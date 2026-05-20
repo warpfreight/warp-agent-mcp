@@ -15,10 +15,10 @@
     "claude",
     "cursor"
   ],
-  "homepage": "https://github.com/rahulharikumarr/warp-agent-mcp#readme",
+  "homepage": "https://github.com/warpfreight/warp-agent-mcp#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rahulharikumarr/warp-agent-mcp.git"
+    "url": "git+https://github.com/warpfreight/warp-agent-mcp.git"
   },
   "type": "module",
   "bin": {
@@ -49,6 +49,6 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/rahulharikumarr/warp-agent-mcp/issues"
+    "url": "https://github.com/warpfreight/warp-agent-mcp/issues"
   }
 }

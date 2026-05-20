@@ -113,7 +113,7 @@ client. Same backend, command-line surface for scripting + CI.
 
 ## Contributing
 
-Issues and PRs welcome at <https://github.com/troy-lgtm/warp-agent-mcp>.
+Issues and PRs welcome at <https://github.com/warpfreight/warp-agent-mcp>.
 
 ## License
 
