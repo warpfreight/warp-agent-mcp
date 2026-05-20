@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output (committed for npm publish but not for git history snapshots)
+# dist/ is required in the published tarball so we DO commit it
+
+# Local pack tarballs from `npm pack`
+*.tgz
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# npm
+.npmrc

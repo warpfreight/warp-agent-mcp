@@ -1,0 +1,54 @@
+{
+  "name": "warp-agent-mcp",
+  "version": "0.5.67",
+  "description": "MCP server for the Warp freight API. 17 tools covering the full booking lifecycle: quote (van/box-truck/FTL/LTL/multi-stop), book, track, events, cancel, invoices, documents, lane history, quote history, rate card. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
+  "keywords": [
+    "warp",
+    "freight",
+    "logistics",
+    "shipping",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "agent",
+    "llm",
+    "claude",
+    "cursor"
+  ],
+  "homepage": "https://github.com/rahulharikumarr/warp-agent-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rahulharikumarr/warp-agent-mcp.git"
+  },
+  "type": "module",
+  "bin": {
+    "warp-agent-mcp": "scripts/run.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/add-shebang.mjs",
+    "dev": "tsc --watch",
+    "postinstall": "node scripts/postinstall.mjs",
+    "test": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/rahulharikumarr/warp-agent-mcp/issues"
+  }
+}

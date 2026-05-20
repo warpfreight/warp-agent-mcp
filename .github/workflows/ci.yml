@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc)
+        run: npm run build
+
+      - name: Audit — no hardcoded secrets in dist
+        run: |
+          set -e
+          # The do-not-invoice shared secret that previously leaked
+          if grep -rE 'ed409ba00ee414b81b2703f23a80d6c5e' dist/; then
+            echo "❌ Hardcoded do-not-invoice secret found in dist"; exit 1
+          fi
+          # No Slack webhook hardcodes
+          if grep -rE 'hooks\.slack\.com/services/T[A-Z0-9]+' dist/; then
+            echo "❌ Hardcoded Slack webhook found in dist"; exit 1
+          fi
+          # No raw wak_* tokens
+          if grep -rE 'wak_(live|test)_[A-Za-z0-9]{20,}' dist/; then
+            echo "❌ Hardcoded wak_* token found in dist"; exit 1
+          fi
+          echo "✓ no secret patterns found"
+
+      - name: E2E smoke test
+        env:
+          WARP_API_KEY: ${{ secrets.WARP_TEST_API_KEY }}
+        run: |
+          if [ -z "$WARP_API_KEY" ]; then
+            echo "WARP_TEST_API_KEY not set in repo secrets — running schema-only checks"
+          fi
+          node test/e2e.mjs

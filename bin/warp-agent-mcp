@@ -1,0 +1,31 @@
+#!/bin/bash
+# Resolve real path of this script following symlinks
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+BUNDLE="$SCRIPT_DIR/../bundle/index.js"
+
+# Find Node.js 18+
+for NODE in \
+  "$HOME/.nvm/versions/node/v22.22.1/bin/node" \
+  "$HOME/.nvm/versions/node/v22.11.0/bin/node" \
+  "$HOME/.nvm/versions/node/v20.11.1/bin/node" \
+  "$HOME/.nvm/versions/node/v20.11.0/bin/node" \
+  "$HOME/.nvm/versions/node/v18.18.0/bin/node" \
+  "/opt/homebrew/bin/node" \
+  "/usr/local/bin/node" \
+  "$(command -v node 2>/dev/null)"; do
+  if [ -x "$NODE" ]; then
+    MAJOR=$("$NODE" -e "process.stdout.write(process.versions.node.split('.')[0])" 2>/dev/null)
+    if [ -n "$MAJOR" ] && [ "$MAJOR" -ge 18 ] 2>/dev/null; then
+      # Pass all env vars through explicitly, including WARP_API_KEY
+      exec env WARP_API_KEY="$WARP_API_KEY" WARP_API_URL="$WARP_API_URL" "$NODE" "$BUNDLE" "$@"
+    fi
+  fi
+done
+echo "warp-agent-mcp requires Node.js 18+. Install from https://nodejs.org" >&2
+exit 1
