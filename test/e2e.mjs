@@ -157,6 +157,30 @@ async function main() {
     }
   }
 
+  // ── Regression: warp_book pickup + delivery must advertise as full
+  //    object schemas, never a $ref or untyped node. A shared Zod instance
+  //    used to emit delivery as "$ref: #/properties/pickup", which MCP
+  //    clients serialized as a string → "Expected object, received string"
+  //    and bookings on new lanes were impossible. (Reported 2026-05.)
+  console.log("\n== warp_book delivery schema (regression guard) ==");
+  const bookTool = (list.result?.tools ?? []).find((t) => t.name === "warp_book");
+  const props = bookTool?.inputSchema?.properties ?? {};
+  expect("pickup advertised as type:object", props.pickup?.type === "object");
+  expect("delivery advertised as type:object", props.delivery?.type === "object");
+  expect("delivery has a properties block", !!props.delivery?.properties);
+  expect(
+    "delivery requires the core address fields (not email)",
+    Array.isArray(props.delivery?.required) &&
+      ["zipCode", "city", "state", "street", "contactName", "phone"].every((f) =>
+        props.delivery.required.includes(f),
+      ) &&
+      !props.delivery.required.includes("email"),
+  );
+  expect(
+    "warp_book inputSchema contains no $ref (clients can't dereference)",
+    !JSON.stringify(bookTool?.inputSchema ?? {}).includes("$ref"),
+  );
+
   // ── warp_status ─────────────────────────────────────────────────
   console.log("\n== warp_status ==");
   const status = await call("tools/call", { name: "warp_status", arguments: {} });

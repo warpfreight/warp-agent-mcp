@@ -271,7 +271,16 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── 5. warp_book ────────────────────────────────────────────────
 
-  const addressSchema = z.object({
+  // IMPORTANT: pickup and delivery MUST be two distinct z.object() instances,
+  // not a shared `addressSchema`. zod-to-json-schema deduplicates shared
+  // instances into a $ref ("$ref": "#/properties/pickup"), and MCP clients /
+  // LLM tool-calling frameworks that don't dereference $ref then send the
+  // value as a bare string — which the server's Zod .object() validation
+  // rejects with `Expected object, received string`. Inlining both fully
+  // keeps the advertised JSON Schema and the runtime validation in sync.
+  // (Reported by a Claude API user 2026-05; do not collapse these back into
+  // one shared schema.)
+  const pickupSchema = z.object({
     zipCode: z.string().describe("5-digit ZIP"),
     city: z.string().describe("City name"),
     state: z.string().describe("2-letter state code"),
@@ -282,13 +291,26 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     specialInstruction: z.string().optional().describe("Special instructions"),
   });
 
+  const deliverySchema = z.object({
+    zipCode: z.string().describe("5-digit ZIP"),
+    city: z.string().describe("City name"),
+    state: z.string().describe("2-letter state code"),
+    street: z.string().describe("Street address"),
+    contactName: z.string().describe("Contact full name"),
+    phone: z.string().describe("Phone number"),
+    // Consignee email is frequently unknown to the shipper, so it's optional
+    // on delivery (unlike pickup, where it's required).
+    email: z.string().optional().describe("Email address (optional — consignee email is often unknown)"),
+    specialInstruction: z.string().optional().describe("Special instructions"),
+  });
+
   server.tool(
     "warp_book",
     "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required.",
     {
-      quote_id: z.string().describe("Quote ID from warp_quote_id (Warp) or id field of any market option returned by a quote tool"),
-      pickup: addressSchema.optional().describe("Pickup address. Required if no default shipper is saved on your account."),
-      delivery: addressSchema.optional().describe("Delivery address. Required if this lane has not been shipped before."),
+      quote_id: z.string().describe("Quote ID from warp_quote_id (Warp) or id field of any market option returned by a quote tool. Use the id from your MOST RECENT quote — market-option ids rotate on every quote call and stale ids are rejected."),
+      pickup: pickupSchema.optional().describe("Pickup address. Required if no default shipper is saved on your account."),
+      delivery: deliverySchema.optional().describe("Delivery address. Required if this lane has not been shipped before."),
       notes: z.string().optional().describe("Special instructions for the shipment"),
       reference: z.string().optional().describe("Your internal reference number"),
     },
@@ -327,7 +349,30 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           ...(params.notes    ? { notes:    params.notes }    : {}),
           ...(params.reference ? { reference: params.reference } : {}),
         };
-        const data = await client.book(body) as Record<string, unknown>;
+        let data: Record<string, unknown>;
+        try {
+          data = await client.book(body) as Record<string, unknown>;
+        } catch (bookErr) {
+          const m = errText(bookErr);
+          // The card was already charged above (charge-me runs before book).
+          // A stale/expired quote_id is the most common book failure — give a
+          // clear, actionable message and flag the charge so the caller can
+          // reconcile rather than silently double-charging on a retry.
+          if (/quoteid is not valid|invalid_field_data|quote.*(expired|not valid|superseded)/i.test(m)) {
+            return {
+              content: [{
+                type: "text",
+                text:
+                  `Booking failed: the quote has expired or been superseded. Warp and market-option quote ids are short-lived and rotate on every quote call, so only the id from your MOST RECENT quote is bookable. ` +
+                  `Re-run the quote tool and book immediately with the fresh id.\n\n` +
+                  `IMPORTANT: your card was already charged $${cachedAmount.toFixed(2)} for this attempt before the booking was rejected. ` +
+                  `Do NOT simply retry (that would charge again). Contact support@wearewarp.com to confirm the charge is reversed, or wait for the automatic refund of the un-booked charge.`,
+              }],
+              isError: true,
+            };
+          }
+          throw bookErr;
+        }
 
         // Do-not-invoice is handled server-side by warp-site as part of the
         // book flow now — the proxy already knows the Stripe charge was made
