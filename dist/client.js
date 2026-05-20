@@ -467,8 +467,13 @@ export class WarpClient {
         return this.request("GET", `/freights/invoices/${encodeURIComponent(orderId)}`, { auth: true });
     }
     // ── Documents (auth) ──────────────────────────────────────────
-    documents(orderId) {
-        return this.request("GET", `/freights/documents/${encodeURIComponent(orderId)}`, { auth: true });
+    documents(orderId, type) {
+        // Bao (Warp backend, 2026-05): the freight API now returns EXTERNAL /
+        // brokered carrier BOLs via ?type=bol on this endpoint. Pass the type
+        // through so callers can pull the Bill of Lading for market-carrier
+        // bookings (which previously had no API-accessible BOL).
+        const q = type ? `?type=${encodeURIComponent(type)}` : "";
+        return this.request("GET", `/freights/documents/${encodeURIComponent(orderId)}${q}`, { auth: true });
     }
     // ── Quote history (auth) ──────────────────────────────────────
     quoteHistory() {

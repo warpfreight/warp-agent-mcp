@@ -128,7 +128,7 @@ export declare class WarpClient {
     cancel(params: Record<string, unknown>): Promise<unknown>;
     events(shipmentId: string): Promise<unknown>;
     invoice(orderId: string): Promise<unknown>;
-    documents(orderId: string): Promise<unknown>;
+    documents(orderId: string, type?: string): Promise<unknown>;
     quoteHistory(): Promise<unknown>;
     laneHistory(): Promise<unknown>;
     rateCard(): Promise<unknown>;

@@ -603,12 +603,13 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 14. warp_get_documents ──────────────────────────────────────
-    server.tool("warp_get_documents", "List shipment documents (BOL, POD, customs forms, etc.). Returns URLs or document references. Auth required.", {
+    server.tool("warp_get_documents", "List shipment documents (BOL, POD, customs forms, etc.). Returns download URLs. Auth required. To fetch the Bill of Lading, pass document_type='bol' — this is how EXTERNAL / brokered (market-carrier) BOLs are returned now, not just Warp-carrier ones.", {
         order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
+        document_type: z.string().optional().describe("Filter to one document type. Common: 'bol' (Bill of Lading — required for external/market carrier BOLs), 'pod' (proof of delivery). Omit to list all documents."),
     }, async (params) => {
         const start = Date.now();
         try {
-            const data = await client.documents(params.order_id);
+            const data = await client.documents(params.order_id, params.document_type);
             trackEvent({
                 product: 'warp-agent',
                 source: 'mcp',
