@@ -25,6 +25,35 @@ function validateDate(date: string): true | string {
 }
 
 
+// Reverse a charge-me charge after a failed booking. /agents/refund-me is
+// idempotent server-side (keyed on the PaymentIntent), so a retry won't
+// double-refund. Returns a human-readable note for the tool response; never
+// throws — if the refund can't be confirmed it degrades to a support message.
+async function autoRefund(apiKey: string, paymentIntentId: string | undefined, amount: number, quoteId: string): Promise<string> {
+  const dollars = `$${amount.toFixed(2)}`;
+  if (!paymentIntentId) {
+    return `Your card was charged ${dollars} but the booking failed and no charge reference was captured to auto-refund. Contact support@wearewarp.com (quote ${quoteId}) to reverse it.`;
+  }
+  try {
+    const res = await fetch("https://www.wearewarp.com/api/v1/agents/refund-me", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const b = await res.json() as Record<string, unknown>;
+    if (res.ok && (b.status === "succeeded" || b.status === "pending")) {
+      return `Your ${dollars} charge was automatically refunded (refund ${b.refund_id}${b.test_mode ? ", sandbox" : ""}) — no action needed.`;
+    }
+    if (res.status === 409) {
+      return `Your ${dollars} charge was already refunded — no action needed.`;
+    }
+    return `We attempted to auto-refund your ${dollars} charge but it did not confirm (${String(b.error ?? b.code ?? res.status)}). Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
+  } catch {
+    return `We attempted to auto-refund your ${dollars} charge but the refund request errored. Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
+  }
+}
+
 // Log quotes to our DB so warp_quote_history works across all surfaces
 async function logQuote(apiKey: string | undefined, quoteId: string, originZip: string, destZip: string, mode: string, priceCents: number | null, pallets: number): Promise<void> {
   if (!apiKey || !quoteId) return;
@@ -330,12 +359,12 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
 
         // Pay-gate: charge the saved card BEFORE booking. /warp/freights/booking
-        // is book-only, so payment is enforced here. KNOWN RISK: if the book
-        // call below fails after this charge succeeds, the customer is charged
-        // with no shipment — see the WarpClient.book() note. The stale-quote
-        // branch below tells the caller a charge already happened so they don't
-        // blindly retry. (True atomicity needs the backend to either accept
-        // /warp/ quote ids at /freight/book, or add an authorize→capture flow.)
+        // is book-only, so payment is enforced here. The charge→book ordering
+        // means a book failure could leave the customer charged with no
+        // shipment, so the catch below auto-reverses the charge via
+        // /agents/refund-me. (A backend authorize→capture flow, or accepting
+        // /warp quote ids at the atomic /freight/book, would remove the gap
+        // entirely — see the WarpClient.book() note.)
         const chargeRes = await fetch("https://www.wearewarp.com/api/v1/agents/charge-me", {
           method: "POST",
           headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -350,6 +379,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           }
           return { content: [{ type: "text", text: `Payment failed: ${msg}. No charge was made.` }], isError: true };
         }
+        // Charge succeeded — keep the PaymentIntent id so we can auto-refund
+        // it if the booking below fails.
+        const paymentIntentId = chargeBody.payment_intent_id as string | undefined;
 
         const body: Record<string, unknown> = {
           quote_id: params.quote_id,
@@ -363,20 +395,16 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           data = await client.book(body) as Record<string, unknown>;
         } catch (bookErr) {
           const m = errText(bookErr);
-          // Stale/expired quote is the most common book failure. The card was
-          // charged just above, so warn the caller not to blindly retry.
-          if (/quoteid is not valid|invalid_field_data|quote.*(expired|not valid|superseded)/i.test(m)) {
-            return {
-              content: [{
-                type: "text",
-                text:
-                  `Booking failed: the quote has expired or been superseded. Warp and market-option quote ids are short-lived and rotate on every quote call, so only the id from your MOST RECENT quote is bookable.\n\n` +
-                  `IMPORTANT: your card was already charged $${cachedAmount.toFixed(2)} for this attempt before the booking was rejected. Do NOT simply retry (that would charge again). Contact support@wearewarp.com to reverse the charge, then re-quote and book with a fresh id.`,
-              }],
-              isError: true,
-            };
-          }
-          throw bookErr;
+          // The card was charged just above but the booking failed — reverse
+          // the charge automatically so the customer is never left charged
+          // with no shipment. (The non-atomic charge→book ordering is forced
+          // by /warp/freights/booking being book-only; see client.book() note.)
+          const refundNote = await autoRefund(apiKey, paymentIntentId, cachedAmount, params.quote_id as string);
+          const stale = /quoteid is not valid|invalid_field_data|quote.*(expired|not valid|superseded)/i.test(m);
+          const reason = stale
+            ? `Booking failed: the quote has expired or been superseded. Warp and market-option quote ids are short-lived and rotate on every quote call, so only the id from your MOST RECENT quote is bookable. Re-quote and book again with a fresh id.`
+            : `Booking failed: ${m}`;
+          return { content: [{ type: "text", text: `${reason}\n\n${refundNote}` }], isError: true };
         }
 
         // Do-not-invoice is handled server-side by warp-site as part of the
