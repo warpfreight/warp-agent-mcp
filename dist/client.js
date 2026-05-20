@@ -380,82 +380,60 @@ export class WarpClient {
     }
     // ── Booking (auth) ────────────────────────────────────────────
     /**
-     * Book a quoted shipment via the ATOMIC /freight/book endpoint.
+     * Book a quoted shipment via /warp/freights/booking — the booking endpoint
+     * in the SAME system as our quote endpoint (/warp/freights/quote), so the
+     * PRICING_… / market-option ids we cache are valid here.
      *
-     * This endpoint charges the card AND books the shipment in a single
-     * server-side transaction, returning { ok, trackingNumber, orderId,
-     * shipmentId, charged, stripePaymentIntentId }. That atomicity is the whole
-     * point: the previous flow made two separate client calls — POST
-     * /agents/charge-me, then POST /freights/booking — so a booking failure
-     * after a successful charge left the customer charged with no shipment. By
-     * collapsing to one call, the client can no longer create a charged-but-not-
-     * booked state; charge/book coordination lives server-side where it belongs.
-     *
-     * The endpoint lives at /api/v1/freight/book (one level up from the
-     * /api/v1/warp/ proxy base), and takes a flat address shape (zip / contact /
-     * company) plus pallets / weightPerPallet / pickupDate, which we replay from
-     * the quote-context cache populated at quote time.
+     * NOTE on atomicity: this endpoint books only; the card is charged
+     * separately by the caller (tools.ts → /agents/charge-me) BEFORE this runs.
+     * That ordering carries a known risk — a booking failure after a successful
+     * charge leaves the customer charged with no shipment. The atomic
+     * /freight/book endpoint avoids that, but it lives in a DIFFERENT system
+     * (paired with /freight/quote, which returns no market options) and does not
+     * accept PRICING_ ids from /warp/freights/quote. Reconciling the two
+     * systems (so we get atomicity without losing market quotes) is a backend
+     * task — see the note in tools.ts warp_book.
      */
-    async book(params) {
-        const quoteId = params.quote_id;
-        const ctx = this.quoteCtxCache.get(quoteId);
+    book(params) {
         const pickup = params.pickup;
         const delivery = params.delivery;
-        // Remap the MCP address shape (zipCode/contactName) → the atomic
-        // endpoint's flat shape (zip/contact/company).
-        //
-        // The /freight/book endpoint REQUIRES an email on both stops. We advertise
-        // delivery.email as optional (consignee email is frequently unknown — per
-        // the bug report), so when it's absent we fall back to the shipper's own
-        // pickup email, then a Warp noreply, so the endpoint is always satisfied
-        // and the booking doesn't fail late with "delivery.email is required".
-        const mapAddr = (a, fallbackEmail) => ({
-            company: a.company ?? a.contactName,
-            contact: a.contactName,
-            phone: a.phone,
-            email: a.email ?? fallbackEmail,
-            street: a.street,
-            city: a.city,
-            state: a.state,
-            zip: a.zipCode,
-            ...(a.specialInstruction ? { specialInstruction: a.specialInstruction } : {}),
+        const defaultWindow = () => {
+            const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+            return { from: `${tomorrow}T08:00:00.000Z`, to: `${tomorrow}T17:00:00.000Z` };
+        };
+        const buildStop = (addr) => ({
+            locationName: addr.company || addr.contactName,
+            contactName: addr.contactName,
+            contactPhone: addr.phone,
+            contactEmail: addr.email,
+            address: {
+                street: addr.street,
+                city: addr.city,
+                state: addr.state,
+                zipcode: addr.zipCode,
+                country: "US",
+            },
+            windowTime: defaultWindow(),
         });
-        const pickupEmail = pickup?.email;
-        const body = { quoteId };
-        if (ctx?.pickupDate)
-            body.pickupDate = ctx.pickupDate;
-        if (ctx?.pallets)
-            body.pallets = ctx.pallets;
-        if (ctx?.weightPerPallet)
-            body.weightPerPallet = ctx.weightPerPallet;
+        // listItems must match what was quoted (the gateway rejects mismatches).
+        // Pull from the quote-context cache populated at quote time.
+        const ctx = this.quoteCtxCache.get(params.quote_id);
+        const items = params.items
+            || ctx?.items
+            || [{ name: "Freight", quantity: 1, totalWeight: 200, weightUnit: "lbs", length: 48, width: 40, height: 48, sizeUnit: "IN", stackable: false }];
+        const body = {
+            quoteId: params.quote_id,
+            listItems: items,
+        };
         if (pickup)
-            body.pickup = mapAddr(pickup);
+            body.pickupInfo = buildStop(pickup);
         if (delivery)
-            body.delivery = mapAddr(delivery, pickupEmail ?? "noreply@wearewarp.com");
+            body.deliveryInfo = buildStop(delivery);
         if (params.reference)
             body.referenceNo = params.reference;
         if (params.notes)
             body.note = params.notes;
-        // Atomic endpoint is at the proxy root (/api/v1/freight/book), one level
-        // above the /api/v1/warp/ base. Strip the trailing /warp/ to reach it.
-        const atomicBookUrl = this.base.replace(/\/warp\/?$/, "/") + "freight/book";
-        const res = await fetch(atomicBookUrl, {
-            method: "POST",
-            headers: this.headers(true),
-            body: JSON.stringify(body),
-            redirect: "follow",
-        });
-        const text = await res.text();
-        let json;
-        try {
-            json = JSON.parse(text);
-        }
-        catch {
-            json = { raw: text };
-        }
-        if (!res.ok)
-            throw new WarpApiError(res.status, json);
-        return json;
+        return this.request("POST", "/freights/booking", { body, auth: true });
     }
     // ── Shipments list (auth) ─────────────────────────────────────
     listBookings(limit) {

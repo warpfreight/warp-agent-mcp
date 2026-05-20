@@ -108,21 +108,19 @@ export declare class WarpClient {
     private _oldLtlQuote;
     _deadcode(params: Record<string, unknown>): Promise<unknown>;
     /**
-     * Book a quoted shipment via the ATOMIC /freight/book endpoint.
+     * Book a quoted shipment via /warp/freights/booking — the booking endpoint
+     * in the SAME system as our quote endpoint (/warp/freights/quote), so the
+     * PRICING_… / market-option ids we cache are valid here.
      *
-     * This endpoint charges the card AND books the shipment in a single
-     * server-side transaction, returning { ok, trackingNumber, orderId,
-     * shipmentId, charged, stripePaymentIntentId }. That atomicity is the whole
-     * point: the previous flow made two separate client calls — POST
-     * /agents/charge-me, then POST /freights/booking — so a booking failure
-     * after a successful charge left the customer charged with no shipment. By
-     * collapsing to one call, the client can no longer create a charged-but-not-
-     * booked state; charge/book coordination lives server-side where it belongs.
-     *
-     * The endpoint lives at /api/v1/freight/book (one level up from the
-     * /api/v1/warp/ proxy base), and takes a flat address shape (zip / contact /
-     * company) plus pallets / weightPerPallet / pickupDate, which we replay from
-     * the quote-context cache populated at quote time.
+     * NOTE on atomicity: this endpoint books only; the card is charged
+     * separately by the caller (tools.ts → /agents/charge-me) BEFORE this runs.
+     * That ordering carries a known risk — a booking failure after a successful
+     * charge leaves the customer charged with no shipment. The atomic
+     * /freight/book endpoint avoids that, but it lives in a DIFFERENT system
+     * (paired with /freight/quote, which returns no market options) and does not
+     * accept PRICING_ ids from /warp/freights/quote. Reconciling the two
+     * systems (so we get atomicity without losing market quotes) is a backend
+     * task — see the note in tools.ts warp_book.
      */
     book(params: Record<string, unknown>): Promise<unknown>;
     listBookings(limit?: number): Promise<unknown>;
