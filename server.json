@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.warpfreight/warp-agent-mcp",
+  "description": "MCP server for the Warp freight API. 16 tools covering the full freight booking lifecycle for LTL, FTL, cargo van, and box truck. Quote, book, track, list bookings, list quotes, get invoices and documents, view analytics, log in. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/warpfreight/warp-agent-mcp",
+    "source": "github"
+  },
+  "version": "0.5.69",
+  "websiteUrl": "https://wearewarp.com",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "warp-agent-mcp",
+      "version": "0.5.69",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WARP_API_KEY",
+          "description": "Warp API key (wak_live_* or wak_test_*). Optional — the package prefers ~/.warp/config.json populated by `warp-agent signup` or `warp-agent login`.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WARP_API_URL",
+          "description": "Override the API base URL. Defaults to https://www.wearewarp.com/api/v1/warp (the warp-site proxy that accepts wak_* tokens). Set to https://gw.wearewarp.com/api/v1 for direct gateway access with a raw customer key.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
