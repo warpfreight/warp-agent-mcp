@@ -10,7 +10,7 @@ agent.
 
 ## What it does
 
-20 tools that let an AI agent talk to your Warp account:
+16 tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
@@ -18,15 +18,11 @@ agent.
 | `warp_box_truck_quote` | Quote a 1–12 pallet box truck shipment |
 | `warp_ftl_quote` | Quote a full truckload (53' dry van) |
 | `warp_ltl_quote` | Quote LTL — Warp's flagship freight product |
-| `warp_multistop_quote` | Quote a multi-stop FTL (one truck, multiple stops) |
 | `warp_book` | Book any quote by id, with pickup + delivery addresses |
-| `warp_multistop_book` | Book a multi-stop FTL with full stop info |
 | `warp_track` | Track a shipment by id or order id |
 | `warp_events` | Full tracking event timeline for a shipment |
-| `warp_cancel` | Attempt to cancel a booking (Warp blocks self-cancel — returns the actual error) |
 | `warp_lane_history` | Past shipments on your lanes |
 | `warp_list_bookings` | List recent bookings |
-| `warp_rate_card` | Your negotiated rate card (if any) |
 | `warp_quote_history` | List recent quotes across all sessions |
 | `warp_get_invoice` | Invoice for a delivered shipment |
 | `warp_get_documents` | Shipment documents (BOL, POD, customs) |
@@ -34,6 +30,8 @@ agent.
 | `warp_payment_status` | Check whether a card is on file |
 | `warp_status` | API health + key validity check |
 | `warp_analytics` | Bookings + revenue rollup by source |
+
+_Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one), `warp_multistop_quote` + `warp_multistop_book` (multi-stop FTL coverage is sparse). Contact support@wearewarp.com if you need any of these._
 
 ## Install
 

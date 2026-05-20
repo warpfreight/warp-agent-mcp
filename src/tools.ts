@@ -416,43 +416,6 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 7. warp_cancel ──────────────────────────────────────────────
-
-  server.tool(
-    "warp_cancel",
-    "Attempt to cancel a booking. Auth required. NOTE: Warp's API does not allow customer self-cancellation — this will return an error. Cancellations must be requested via Warp support. Still try this tool first so the user gets the accurate error message.",
-    {
-      booking_id: z.string().describe("Booking ID to cancel"),
-    },
-    async (params) => {
-      const start = Date.now();
-      try {
-        const data = await client.cancel(params);
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'cancel',
-          tool_name: 'warp_cancel',
-          success: true,
-          order_id: params.booking_id,
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch (err) {
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'error',
-          tool_name: 'warp_cancel',
-          success: false,
-          error_message: errText(err),
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
-      }
-    },
-  );
-
   // ── 8. warp_lane_history ────────────────────────────────────────
 
   server.tool(
@@ -514,40 +477,6 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           source: 'mcp',
           event_type: 'error',
           tool_name: 'warp_list_bookings',
-          success: false,
-          error_message: errText(err),
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
-      }
-    },
-  );
-
-  // ── 10. warp_rate_card ──────────────────────────────────────────
-
-  server.tool(
-    "warp_rate_card",
-    "Get your negotiated rate card. Auth required.",
-    {},
-    async () => {
-      const start = Date.now();
-      try {
-        const data = await client.rateCard();
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'other',
-          tool_name: 'warp_rate_card',
-          success: true,
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch (err) {
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'error',
-          tool_name: 'warp_rate_card',
           success: false,
           error_message: errText(err),
           duration_ms: Date.now() - start,
@@ -738,110 +667,6 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       } catch (err) {
         trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_quote_history', success: false, error_message: errText(err), duration_ms: Date.now() - start });
         return { content: [{ type: "text", text: `Quote history unavailable: ${errText(err)}` }], isError: true };
-      }
-    },
-  );
-
-  // ── 16. warp_multistop_quote ────────────────────────────────────
-
-  const multistopAddressSchema = z.object({
-    zipCode: z.string().describe("5-digit ZIP"),
-    city: z.string().optional().describe("City name"),
-    state: z.string().optional().describe("2-letter state code"),
-    street: z.string().optional().describe("Street address"),
-    contactName: z.string().optional().describe("Contact name"),
-    phone: z.string().optional().describe("Phone number"),
-    email: z.string().optional().describe("Email address"),
-  });
-
-  const multistopStopSchema = z.object({
-    type: z.enum(["pickup", "delivery"]).describe("pickup or delivery stop"),
-    address: multistopAddressSchema,
-    pallets: z.number().int().min(1).optional().describe("Pallets to handle at this stop"),
-    weight_lbs: z.number().min(50).optional().describe("Weight handled at this stop"),
-    appointment: z.string().optional().describe("Appointment time / window"),
-  });
-
-  server.tool(
-    "warp_multistop_quote",
-    "Quote an FTL multi-stop shipment (one truck, multiple pickups/deliveries). Pass pickup_date plus an ordered list of stops (each with type=pickup or delivery and address). Auth required.",
-    {
-      pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("First pickup date YYYY-MM-DD"),
-      stops: z.array(multistopStopSchema).min(3).describe("Ordered list of stops (min 3: 1 pickup + at least 1 intermediate + 1 final delivery). Mix pickups and deliveries."),
-      total_pallets: z.number().int().min(1).max(26).describe("Total pallets across all pickups"),
-      total_weight_lbs: z.number().min(50).describe("Total weight across all pallets"),
-      vehicle_type: z.string().optional().describe("Vehicle code (default DRY_VAN_53)"),
-    },
-    async (params) => {
-      const start = Date.now();
-      try {
-        const data = await client.multistopQuote(params);
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'quote',
-          tool_name: 'warp_multistop_quote',
-          success: true,
-          mode: 'ftl',
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch (err) {
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'error',
-          tool_name: 'warp_multistop_quote',
-          success: false,
-          error_message: errText(err),
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
-      }
-    },
-  );
-
-  // ── 17. warp_multistop_book ─────────────────────────────────────
-
-  server.tool(
-    "warp_multistop_book",
-    "Book a quoted multi-stop FTL shipment. Pass the quote_id from warp_multistop_quote plus the same stops array with full address/contact info on each stop. Auth required.",
-    {
-      quote_id: z.string().describe("Quote ID from warp_multistop_quote"),
-      stops: z.array(multistopStopSchema).min(2).describe("Same stops list with full address/contact fields"),
-      reference: z.string().optional().describe("Your internal reference number"),
-      notes: z.string().optional().describe("Notes for the carrier"),
-    },
-    async (params) => {
-      const start = Date.now();
-      try {
-        const data = await client.multistopBook(params);
-        const bookData = data as Record<string, unknown>;
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'book',
-          tool_name: 'warp_multistop_book',
-          success: true,
-          tracking_number: bookData?.trackingNumber as string | undefined,
-          order_id: bookData?.orderId as string | undefined,
-          quote_id: params.quote_id,
-          amount_usd: bookData?.totalPrice as number | undefined,
-          mode: 'ftl',
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-      } catch (err) {
-        trackEvent({
-          product: 'warp-agent',
-          source: 'mcp',
-          event_type: 'error',
-          tool_name: 'warp_multistop_book',
-          success: false,
-          error_message: errText(err),
-          duration_ms: Date.now() - start,
-        });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
       }
     },
   );

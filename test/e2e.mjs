@@ -27,11 +27,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const RUN_MJS = join(__dirname, "..", "scripts", "run.mjs");
 
 // Tools the MCP MUST expose. Tests fail if any are missing or extra.
+// Reduced from 20 → 16 in 0.5.68 — removed warp_cancel (Warp blocks self-cancel),
+// warp_rate_card (account-state, AuthorizationRequired for fresh accounts),
+// warp_multistop_quote + warp_multistop_book (sparse backend lane coverage).
 const EXPECTED_TOOLS = [
   "warp_analytics",
   "warp_book",
   "warp_box_truck_quote",
-  "warp_cancel",
   "warp_events",
   "warp_ftl_quote",
   "warp_get_documents",
@@ -40,11 +42,8 @@ const EXPECTED_TOOLS = [
   "warp_list_bookings",
   "warp_login",
   "warp_ltl_quote",
-  "warp_multistop_book",
-  "warp_multistop_quote",
   "warp_payment_status",
   "warp_quote_history",
-  "warp_rate_card",
   "warp_status",
   "warp_track",
   "warp_van_quote",
