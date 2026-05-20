@@ -301,30 +301,23 @@ export function registerTools(server, client, getApiKey) {
     }, async (params) => {
         const start = Date.now();
         try {
-            // Charge the saved Stripe card before booking
+            // Guard: require a quote in this session so client.book() has the
+            // freight context (pallets / weight / pickup date) cached to rebuild
+            // the atomic /freight/book payload, and so we fail fast with a clear
+            // "re-quote" message instead of a server rejection.
             const quoteId = params.quote_id;
             const cachedAmount = quoteAmountCache.get(quoteId);
             if (!cachedAmount) {
-                return { content: [{ type: "text", text: `Cannot book: no cached quote amount for ${quoteId}. Please run warp_ltl_quote (or van/box-truck/ftl quote) first, then book immediately after.` }], isError: true };
+                return { content: [{ type: "text", text: `Cannot book: no quote found for ${quoteId} in this session. Quote ids are short-lived and rotate on every quote call. Run warp_ltl_quote (or van/box-truck/ftl quote) first, then book immediately after.` }], isError: true };
             }
             const apiKey = WARP_API_KEY();
             if (!apiKey) {
                 return { content: [{ type: "text", text: "No API key found. Run warp-agent login first." }], isError: true };
             }
-            const chargeRes = await fetch("https://www.wearewarp.com/api/v1/agents/charge-me", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ amount_cents: Math.round(cachedAmount * 100), quote_id: quoteId }),
-                signal: AbortSignal.timeout(10000),
-            });
-            const chargeBody = await chargeRes.json();
-            if (!chargeRes.ok || chargeBody.status !== "succeeded") {
-                const msg = chargeBody.error ?? chargeBody.message ?? "Charge failed";
-                if (chargeRes.status === 402 || String(msg).toLowerCase().includes("card") || String(msg).toLowerCase().includes("payment")) {
-                    return { content: [{ type: "text", text: `No payment method on file. Add a card at https://wearewarp.com/agents/onboard then try again.` }], isError: true };
-                }
-                return { content: [{ type: "text", text: `Payment failed: ${msg}` }], isError: true };
-            }
+            // Single atomic call: client.book() hits /freight/book, which charges
+            // the card AND books the shipment in one server-side transaction. No
+            // separate charge-me step → the client can no longer end up charged-
+            // but-not-booked. The response includes `charged` + `stripePaymentIntentId`.
             const body = {
                 quote_id: params.quote_id,
                 ...(params.pickup ? { pickup: params.pickup } : {}),
@@ -338,21 +331,21 @@ export function registerTools(server, client, getApiKey) {
             }
             catch (bookErr) {
                 const m = errText(bookErr);
-                // The card was already charged above (charge-me runs before book).
-                // A stale/expired quote_id is the most common book failure — give a
-                // clear, actionable message and flag the charge so the caller can
-                // reconcile rather than silently double-charging on a retry.
+                // A stale/expired quote_id is the most common book failure. Because
+                // charge + book are now one atomic call, a rejected quote means NO
+                // charge happened — so the caller can safely re-quote and retry.
                 if (/quoteid is not valid|invalid_field_data|quote.*(expired|not valid|superseded)/i.test(m)) {
                     return {
                         content: [{
                                 type: "text",
                                 text: `Booking failed: the quote has expired or been superseded. Warp and market-option quote ids are short-lived and rotate on every quote call, so only the id from your MOST RECENT quote is bookable. ` +
-                                    `Re-run the quote tool and book immediately with the fresh id.\n\n` +
-                                    `IMPORTANT: your card was already charged $${cachedAmount.toFixed(2)} for this attempt before the booking was rejected. ` +
-                                    `Do NOT simply retry (that would charge again). Contact support@wearewarp.com to confirm the charge is reversed, or wait for the automatic refund of the un-booked charge.`,
+                                    `No charge was made (charge and booking are a single transaction). Re-run the quote tool and book immediately with the fresh id.`,
                             }],
                         isError: true,
                     };
+                }
+                if (/no payment method|NO_CARD|card|payment_required/i.test(m)) {
+                    return { content: [{ type: "text", text: `No payment method on file. Add a card at https://www.wearewarp.com/agents/account then try again. No charge was made.` }], isError: true };
                 }
                 throw bookErr;
             }
