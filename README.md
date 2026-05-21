@@ -97,11 +97,9 @@ tracking number.
 
 ## Sandbox / test mode
 
-When `warp-agent signup` provisions a new account, you also get a `wak_test_*`
-sandbox key saved alongside the live key. Test-mode bookings produce realistic
-responses (rates, label PDFs, tracking numbers) without calling carriers or
-charging your card. Swap the `api_key` field in `~/.warp/config.json` to use
-the sandbox key.
+Sandbox is not yet supported in the MCP. The freight proxy (`/warp/freights/*`)
+currently requires a live `wak_live_*` key; sandbox keys return 401 on quote
+and booking endpoints. Sandbox support is planned for a future release.
 
 ## Companion package
 
@@ -112,6 +110,27 @@ client. Same backend, command-line surface for scripting + CI.
 ## Contributing
 
 Issues and PRs welcome at <https://github.com/warpfreight/warp-agent-mcp>.
+
+## Privacy
+
+**Data collected and sent to Warp servers (`wearewarp.com`):**
+
+- ZIP codes and shipping addresses (quote and book operations)
+- Contact names, phone numbers, and email addresses (booking only)
+- Your Warp account email and API key (stored locally in `~/.warp/config.json` — never transmitted beyond the Warp API)
+
+**Data NOT collected:**
+
+- No analytics or telemetry is sent to any third party
+- Payment card details are never handled by this package — charges are processed server-side by Stripe via the Warp backend
+
+**Storage:** Credentials are stored locally in `~/.warp/config.json` on your machine. No data is stored by the MCP server itself between calls.
+
+**Third parties:** Shipment data is shared with the selected freight carrier (Warp or market carriers) as required to book and execute the shipment.
+
+**Retention:** Data retention is governed by [Warp's Privacy Policy](https://www.wearewarp.com/privacy-policy).
+
+**Contact:** privacy@wearewarp.com
 
 ## License
 

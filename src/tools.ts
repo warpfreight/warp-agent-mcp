@@ -84,6 +84,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
       delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
     },
+    { title: "Get Cargo Van Quote", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -137,6 +138,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
       delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
     },
+    { title: "Get Box Truck Quote", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -187,6 +189,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet (optional)"),
       commodity: z.string().optional().describe("Commodity description"),
     },
+    { title: "Get Full Truckload Quote", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -247,6 +250,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
       delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
     },
+    { title: "Get LTL Freight Quote", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -343,6 +347,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       notes: z.string().optional().describe("Special instructions for the shipment"),
       reference: z.string().optional().describe("Your internal reference number"),
     },
+    { title: "Book Shipment", destructiveHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -465,6 +470,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     {
       shipment_id: z.string().describe("Shipment ID or tracking number (e.g. S-12345-2616)"),
     },
+    { title: "Track Shipment", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -500,6 +506,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "warp_lane_history",
     "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required.",
     {},
+    { title: "View Lane History", readOnlyHint: true },
     async () => {
       const start = Date.now();
       try {
@@ -536,6 +543,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     {
       limit: z.number().int().min(1).max(100).optional().describe("Max bookings to return (default 25, max 100)"),
     },
+    { title: "List Bookings", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -570,6 +578,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "warp_status",
     "Check Warp API health and version. Also validates your API key if one is configured.",
     {},
+    { title: "Check API Status", readOnlyHint: true },
     async () => {
       const start = Date.now();
       try {
@@ -621,6 +630,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     {
       shipment_id: z.string().describe("Shipment ID from warp_book response"),
     },
+    { title: "Get Shipment Events", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -658,6 +668,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     {
       order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
     },
+    { title: "Get Invoice", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -696,6 +707,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
       document_type: z.string().optional().describe("Filter to one document type. Common: 'bol' (Bill of Lading — required for external/market carrier BOLs), 'pod' (proof of delivery). Omit to list all documents."),
     },
+    { title: "Get Shipment Documents", readOnlyHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -733,6 +745,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "warp_quote_history",
     "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required.",
     {},
+    { title: "View Quote History", readOnlyHint: true },
     async () => {
       const start = Date.now();
       try {
@@ -759,6 +772,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       email: z.string().email().describe("Warp account email"),
       password: z.string().min(1).describe("Warp account password"),
     },
+    { title: "Log In to Warp" },
     async (params) => {
       try {
         const CUSTOMER_URL = "https://customer.wearewarp.com";
@@ -833,6 +847,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "warp_payment_status",
     "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.",
     {},
+    { title: "Check Payment Status", readOnlyHint: true },
     async () => {
       // Use the session API key passed to registerTools — never read from env/disk
       const apiKey = WARP_API_KEY();
@@ -861,6 +876,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "warp_analytics",
     "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.",
     {},
+    { title: "View Analytics", readOnlyHint: true },
     async () => {
       const apiKey = WARP_API_KEY();
       if (!apiKey) {

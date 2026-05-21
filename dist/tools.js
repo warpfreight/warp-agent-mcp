@@ -78,7 +78,7 @@ export function registerTools(server, client, getApiKey) {
         commodity: z.string().optional().describe("Commodity description"),
         pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
         delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
-    }, async (params) => {
+    }, { title: "Get Cargo Van Quote", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
@@ -130,7 +130,7 @@ export function registerTools(server, client, getApiKey) {
         commodity: z.string().optional().describe("Commodity description"),
         pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
         delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
-    }, async (params) => {
+    }, { title: "Get Box Truck Quote", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
@@ -179,7 +179,7 @@ export function registerTools(server, client, getApiKey) {
         pallets: z.number().int().min(1).max(26).optional().describe("Pallets (optional, display only)"),
         weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet (optional)"),
         commodity: z.string().optional().describe("Commodity description"),
-    }, async (params) => {
+    }, { title: "Get Full Truckload Quote", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const isCanadaLane = isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip);
@@ -238,7 +238,7 @@ export function registerTools(server, client, getApiKey) {
         hazmat: z.boolean().optional().describe("Hazardous materials flag"),
         pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
         delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
-    }, async (params) => {
+    }, { title: "Get LTL Freight Quote", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
@@ -327,7 +327,7 @@ export function registerTools(server, client, getApiKey) {
         delivery: deliverySchema.optional().describe("Delivery address. Required if this lane has not been shipped before."),
         notes: z.string().optional().describe("Special instructions for the shipment"),
         reference: z.string().optional().describe("Your internal reference number"),
-    }, async (params) => {
+    }, { title: "Book Shipment", destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             // Guard: require a quote in this session so the listItems context is
@@ -441,7 +441,7 @@ export function registerTools(server, client, getApiKey) {
     // ── 6. warp_track ───────────────────────────────────────────────
     server.tool("warp_track", "Track a shipment by ID or tracking number. Auth required.", {
         shipment_id: z.string().describe("Shipment ID or tracking number (e.g. S-12345-2616)"),
-    }, async (params) => {
+    }, { title: "Track Shipment", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const data = await client.track(params.shipment_id);
@@ -470,7 +470,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 8. warp_lane_history ────────────────────────────────────────
-    server.tool("warp_lane_history", "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required.", {}, async () => {
+    server.tool("warp_lane_history", "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required.", {}, { title: "View Lane History", readOnlyHint: true }, async () => {
         const start = Date.now();
         try {
             const data = await client.laneHistory();
@@ -500,7 +500,7 @@ export function registerTools(server, client, getApiKey) {
     // ── 9. warp_list_bookings ───────────────────────────────────────
     server.tool("warp_list_bookings", "List recent bookings for this API key, newest first. Auth required.", {
         limit: z.number().int().min(1).max(100).optional().describe("Max bookings to return (default 25, max 100)"),
-    }, async (params) => {
+    }, { title: "List Bookings", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const data = await client.listBookings(params.limit);
@@ -528,7 +528,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 11. warp_status ─────────────────────────────────────────────
-    server.tool("warp_status", "Check Warp API health and version. Also validates your API key if one is configured.", {}, async () => {
+    server.tool("warp_status", "Check Warp API health and version. Also validates your API key if one is configured.", {}, { title: "Check API Status", readOnlyHint: true }, async () => {
         const start = Date.now();
         try {
             // Hit www.wearewarp.com/api/v1/version (not gw) — gw requires different auth on /version
@@ -572,7 +572,7 @@ export function registerTools(server, client, getApiKey) {
     // ── 12. warp_events ─────────────────────────────────────────────
     server.tool("warp_events", "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries). Auth required.", {
         shipment_id: z.string().describe("Shipment ID from warp_book response"),
-    }, async (params) => {
+    }, { title: "Get Shipment Events", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const data = await client.events(params.shipment_id);
@@ -603,7 +603,7 @@ export function registerTools(server, client, getApiKey) {
     // ── 13. warp_get_invoice ────────────────────────────────────────
     server.tool("warp_get_invoice", "Retrieve the invoice for a delivered shipment (line items, taxes, payment status). Auth required.", {
         order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
-    }, async (params) => {
+    }, { title: "Get Invoice", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const data = await client.invoice(params.order_id);
@@ -635,7 +635,7 @@ export function registerTools(server, client, getApiKey) {
     server.tool("warp_get_documents", "List shipment documents (BOL, POD, customs forms, etc.). Returns download URLs. Auth required. To fetch the Bill of Lading, pass document_type='bol' — this is how EXTERNAL / brokered (market-carrier) BOLs are returned now, not just Warp-carrier ones.", {
         order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
         document_type: z.string().optional().describe("Filter to one document type. Common: 'bol' (Bill of Lading — required for external/market carrier BOLs), 'pod' (proof of delivery). Omit to list all documents."),
-    }, async (params) => {
+    }, { title: "Get Shipment Documents", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
             const data = await client.documents(params.order_id, params.document_type);
@@ -664,7 +664,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 15. warp_quote_history ──────────────────────────────────────────────────────
-    server.tool("warp_quote_history", "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required.", {}, async () => {
+    server.tool("warp_quote_history", "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required.", {}, { title: "View Quote History", readOnlyHint: true }, async () => {
         const start = Date.now();
         try {
             const res = await fetch("https://www.wearewarp.com/api/v1/freight/quote-log", {
@@ -685,7 +685,7 @@ export function registerTools(server, client, getApiKey) {
     server.tool("warp_login", "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if warp_payment_status says no key is configured.", {
         email: z.string().email().describe("Warp account email"),
         password: z.string().min(1).describe("Warp account password"),
-    }, async (params) => {
+    }, { title: "Log In to Warp" }, async (params) => {
         try {
             const CUSTOMER_URL = "https://customer.wearewarp.com";
             const ts = new Date().toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
@@ -754,7 +754,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── warp_payment_status ───────────────────────────────────────
-    server.tool("warp_payment_status", "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.", {}, async () => {
+    server.tool("warp_payment_status", "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.", {}, { title: "Check Payment Status", readOnlyHint: true }, async () => {
         // Use the session API key passed to registerTools — never read from env/disk
         const apiKey = WARP_API_KEY();
         if (!apiKey) {
@@ -776,7 +776,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── warp_analytics ─────────────────────────────────────────
-    server.tool("warp_analytics", "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.", {}, async () => {
+    server.tool("warp_analytics", "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.", {}, { title: "View Analytics", readOnlyHint: true }, async () => {
         const apiKey = WARP_API_KEY();
         if (!apiKey) {
             return { content: [{ type: "text", text: "No API key found. Run warp-agent login first." }], isError: true };

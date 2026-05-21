@@ -1,0 +1,58 @@
+{
+  "manifest_version": "0.3",
+  "name": "warp-agent-mcp",
+  "display_name": "Warp Freight",
+  "version": "0.5.75",
+  "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
+  "long_description": "16 tools covering the full freight booking lifecycle:\n\n- **Quote** — instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL with Warp-native plus market-carrier options\n- **Book** — book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** — real-time shipment status and full event timeline\n- **Manage** — list bookings, view invoices, download BOLs and PODs\n- **Auth** — in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
+  "author": {
+    "name": "Warp Technology, Inc.",
+    "email": "support@wearewarp.com",
+    "url": "https://wearewarp.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/warpfreight/warp-agent-mcp.git"
+  },
+  "homepage": "https://wearewarp.com",
+  "documentation": "https://github.com/warpfreight/warp-agent-mcp#readme",
+  "support": "https://github.com/warpfreight/warp-agent-mcp/issues",
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": ["freight", "shipping", "logistics", "ltl", "ftl", "warp", "cargo", "trucking"],
+  "privacy_policies": ["https://www.wearewarp.com/privacy-policy"],
+  "server": {
+    "type": "node",
+    "entry_point": "scripts/run.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/scripts/run.mjs"],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "warp_van_quote",        "description": "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)" },
+    { "name": "warp_box_truck_quote",  "description": "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)" },
+    { "name": "warp_ftl_quote",        "description": "Quote a full truckload (53' dry van)" },
+    { "name": "warp_ltl_quote",        "description": "Quote an LTL shipment — Warp's flagship freight product with market comparisons" },
+    { "name": "warp_book",             "description": "Book a quoted shipment; charges saved card and auto-refunds on failure" },
+    { "name": "warp_track",            "description": "Track a shipment by ID or tracking number" },
+    { "name": "warp_events",           "description": "Full tracking event timeline for a shipment" },
+    { "name": "warp_lane_history",     "description": "Past shipments on your lanes" },
+    { "name": "warp_list_bookings",    "description": "List recent bookings, newest first" },
+    { "name": "warp_quote_history",    "description": "List recent quotes across all sessions" },
+    { "name": "warp_get_invoice",      "description": "Invoice for a delivered shipment" },
+    { "name": "warp_get_documents",    "description": "Shipment documents (BOL, POD, customs)" },
+    { "name": "warp_login",            "description": "Log in to Warp from inside the chat" },
+    { "name": "warp_payment_status",   "description": "Check whether a payment card is on file" },
+    { "name": "warp_status",           "description": "API health check and key validity" },
+    { "name": "warp_analytics",        "description": "Bookings and revenue rollup by source" }
+  ],
+  "tools_generated": false,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20"
+    }
+  }
+}
