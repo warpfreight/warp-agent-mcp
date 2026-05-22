@@ -90,6 +90,7 @@ export class WarpClient {
       headers: this.headers(opts?.auth ?? false),
       body: opts?.body ? JSON.stringify(opts.body) : undefined,
       redirect: "follow",
+      signal: AbortSignal.timeout(25000),
     });
 
     const text = await res.text();
@@ -150,6 +151,7 @@ export class WarpClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(25000),
     });
 
     if (!res.ok) throw new Error(`FTL quote failed: ${res.status}`);
@@ -295,6 +297,7 @@ export class WarpClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(25000),
     });
     if (!res.ok) throw new Error(`Quote failed: ${res.status}`);
     const data = await res.json() as Record<string, unknown>;
