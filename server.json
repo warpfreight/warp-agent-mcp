@@ -1,7 +1,7 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.warpfreight/warp-agent-mcp",
-  "description": "MCP server for the Warp freight API. 16 tools covering the full freight booking lifecycle for LTL, FTL, cargo van, and box truck. Quote, book, track, list bookings, list quotes, get invoices and documents, view analytics, log in. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
+  "description": "Quote, book, and track LTL, FTL, cargo van, and box-truck freight via the Warp API.",
   "status": "active",
   "repository": {
     "url": "https://github.com/warpfreight/warp-agent-mcp",
