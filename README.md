@@ -3,10 +3,15 @@
 [![npm version](https://img.shields.io/npm/v/warp-agent-mcp.svg)](https://www.npmjs.com/package/warp-agent-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Model Context Protocol (MCP) server for the [Warp](https://wearewarp.com) freight
+> **Note on naming:** This is **Warp Freight Network** ([wearewarp.com](https://www.wearewarp.com)) — the U.S. freight network for shipping real LTL, FTL, box truck, and cargo van freight via AI agents. Not affiliated with warp.dev, the AI-native terminal application for developers. If you want to book real freight from Claude, Cursor, or any AI agent, you're in the right place.
+
+Model Context Protocol (MCP) server for the [Warp Freight Network](https://wearewarp.com) freight
 API. Quote, book, and track LTL, FTL, cargo van, box-truck, and multi-stop
 shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI
-agent.
+agent. Docs at <https://www.wearewarp.com/agents/mcp>. Sister package: the
+[`@warpfreight/cli-agent`](https://www.npmjs.com/package/@warpfreight/cli-agent)
+CLI ([source](https://github.com/warpfreight/warp-cli-agent)) for self-provisioning
+freight accounts from the terminal.
 
 ## What it does
 
