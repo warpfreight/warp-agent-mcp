@@ -1,8 +1,35 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { WarpClient, WarpApiError } from "./client.js";
 import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, isCanadianPostal, CANADA_POLICY, coverageGapRefusal } from "./policy.js";
+import {
+  QUOTE_CARD_RESOURCE_URI,
+  type QuoteMode,
+  renderQuoteCard,
+  toWidgetData,
+} from "./widgets/quote-card.js";
+
+type QuoteInput = { origin_zip: string; destination_zip: string; pickup_date: string; pallets?: number };
+
+// Wrap a quote-tool response so UI-capable clients render the inline quote card.
+// Claude reads the inline text/html resource; ChatGPT Apps SDK reads
+// _meta["openai/outputTemplate"] + structuredContent. Clients without UI ignore
+// the resource and fall back to the text JSON — 100% backwards compatible.
+function quoteToolResult(mode: QuoteMode, input: QuoteInput, data: Record<string, unknown>): CallToolResult {
+  const widget = toWidgetData(mode, input, data);
+  const content: CallToolResult["content"] = [{ type: "text", text: JSON.stringify(data, null, 2) }];
+  if (widget) {
+    content.push({ type: "resource", resource: { uri: QUOTE_CARD_RESOURCE_URI, mimeType: "text/html", text: renderQuoteCard(widget) } });
+  }
+  const result: CallToolResult = { content };
+  if (widget) {
+    result.structuredContent = widget as unknown as Record<string, unknown>;
+    result._meta = { "openai/outputTemplate": QUOTE_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true };
+  }
+  return result;
+}
 
 function errText(err: unknown): string {
   if (err instanceof WarpApiError) return JSON.stringify(err.body, null, 2);
@@ -24,35 +51,6 @@ function validateDate(date: string): true | string {
   return true;
 }
 
-
-// Reverse a charge-me charge after a failed booking. /agents/refund-me is
-// idempotent server-side (keyed on the PaymentIntent), so a retry won't
-// double-refund. Returns a human-readable note for the tool response; never
-// throws — if the refund can't be confirmed it degrades to a support message.
-async function autoRefund(apiKey: string, paymentIntentId: string | undefined, amount: number, quoteId: string): Promise<string> {
-  const dollars = `$${amount.toFixed(2)}`;
-  if (!paymentIntentId) {
-    return `Your card was charged ${dollars} but the booking failed and no charge reference was captured to auto-refund. Contact support@wearewarp.com (quote ${quoteId}) to reverse it.`;
-  }
-  try {
-    const res = await fetch("https://www.wearewarp.com/api/v1/agents/refund-me", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const b = await res.json() as Record<string, unknown>;
-    if (res.ok && (b.status === "succeeded" || b.status === "pending")) {
-      return `Your ${dollars} charge was automatically refunded (refund ${b.refund_id}${b.test_mode ? ", sandbox" : ""}) — no action needed.`;
-    }
-    if (res.status === 409) {
-      return `Your ${dollars} charge was already refunded — no action needed.`;
-    }
-    return `We attempted to auto-refund your ${dollars} charge but it did not confirm (${String(b.error ?? b.code ?? res.status)}). Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
-  } catch {
-    return `We attempted to auto-refund your ${dollars} charge but the refund request errored. Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
-  }
-}
 
 // Log quotes to our DB so warp_quote_history works across all surfaces
 async function logQuote(apiKey: string | undefined, quoteId: string, originZip: string, destZip: string, mode: string, priceCents: number | null, pallets: number): Promise<void> {
@@ -107,7 +105,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           mode: 'van',
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return quoteToolResult("van", params, data);
       } catch (err) {
         trackEvent({
           product: 'warp-agent',
@@ -160,7 +158,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           mode: 'box_truck',
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return quoteToolResult("box-truck", params, data);
       } catch (err) {
         trackEvent({
           product: 'warp-agent',
@@ -212,8 +210,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           mode: 'ftl',
           duration_ms: Date.now() - start,
         });
-        const ftlText = JSON.stringify(data, null, 2);
-        return { content: [{ type: "text", text: ftlText }] };
+        return quoteToolResult("ftl", params, data);
       } catch (err) {
         trackEvent({
           product: 'warp-agent',
@@ -286,7 +283,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           quote_id: qid,
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        return quoteToolResult("ltl", params, data);
       } catch (err) {
         trackEvent({
           product: 'warp-agent',
@@ -363,36 +360,13 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           return { content: [{ type: "text", text: "No API key found. Run warp-agent login first." }], isError: true };
         }
 
-        // Pay-gate: charge the saved card BEFORE booking. /warp/freights/booking
-        // is book-only, so payment is enforced here. The charge→book ordering
-        // means a book failure could leave the customer charged with no
-        // shipment, so the catch below auto-reverses the charge via
-        // /agents/refund-me. (A backend authorize→capture flow, or accepting
-        // /warp quote ids at the atomic /freight/book, would remove the gap
-        // entirely — see the WarpClient.book() note.)
-        const chargeRes = await fetch("https://www.wearewarp.com/api/v1/agents/charge-me", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ amount_cents: Math.round(cachedAmount * 100), quote_id: quoteId }),
-          signal: AbortSignal.timeout(10000),
-        });
-        const chargeBody = await chargeRes.json() as Record<string, unknown>;
-        if (!chargeRes.ok || chargeBody.status !== "succeeded") {
-          const msg = chargeBody.error ?? chargeBody.message ?? "Charge failed";
-          if (chargeRes.status === 402 || String(msg).toLowerCase().includes("card") || String(msg).toLowerCase().includes("payment")) {
-            return { content: [{ type: "text", text: `No payment method on file. Add a card at https://www.wearewarp.com/agents/account then try again. No charge was made.` }], isError: true };
-          }
-          return { content: [{ type: "text", text: `Payment failed: ${msg}. No charge was made.` }], isError: true };
-        }
-        // Charge succeeded — keep the PaymentIntent id so we can auto-refund
-        // it if the booking below fails.
-        const paymentIntentId = chargeBody.payment_intent_id as string | undefined;
-
+        // /api/v1/book is atomic: Stripe charge + gw booking in one call.
+        // No separate charge-me step needed; payment is handled server-side.
         const body: Record<string, unknown> = {
           quote_id: params.quote_id,
-          ...(params.pickup   ? { pickup:   params.pickup }   : {}),
-          ...(params.delivery ? { delivery: params.delivery } : {}),
-          ...(params.notes    ? { notes:    params.notes }    : {}),
+          ...(params.pickup    ? { pickup:    params.pickup }    : {}),
+          ...(params.delivery  ? { delivery:  params.delivery }  : {}),
+          ...(params.notes     ? { notes:     params.notes }     : {}),
           ...(params.reference ? { reference: params.reference } : {}),
         };
         let data: Record<string, unknown>;
@@ -400,36 +374,19 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           data = await client.book(body) as Record<string, unknown>;
         } catch (bookErr) {
           const m = errText(bookErr);
-          // The card was charged just above but the booking failed — reverse
-          // the charge automatically so the customer is never left charged
-          // with no shipment. (The non-atomic charge→book ordering is forced
-          // by /warp/freights/booking being book-only; see client.book() note.)
-          const refundNote = await autoRefund(apiKey, paymentIntentId, cachedAmount, params.quote_id as string);
-          const stale = /quoteid is not valid|invalid_field_data|quote.*(expired|not valid|superseded)/i.test(m);
-          const reason = stale
-            ? `Booking failed: the quote has expired or been superseded. Warp and market-option quote ids are short-lived and rotate on every quote call, so only the id from your MOST RECENT quote is bookable. Re-quote and book again with a fresh id.`
+          const stale = /quote.*expired|quote.*not valid|quote.*superseded|quoteId is not valid/i.test(m);
+          const noCard = /no payment|payment method|card on file|402/i.test(m);
+          const reason = noCard
+            ? `No payment method on file. Add a card at https://www.wearewarp.com/agents/account then try again.`
+            : stale
+            ? `Booking failed: the quote has expired. Re-quote and book again immediately with a fresh id.`
             : `Booking failed: ${m}`;
-          return { content: [{ type: "text", text: `${reason}\n\n${refundNote}` }], isError: true };
+          return { content: [{ type: "text", text: reason }], isError: true };
         }
 
-        // Do-not-invoice is handled server-side by warp-site as part of the
-        // book flow now — the proxy already knows the Stripe charge was made
-        // up-front, so it auto-marks the order. Removing the client-side
-        // call removed a hardcoded shared secret that used to ship in every
-        // tarball; do not reintroduce it here.
-
-        const p = params.pickup as Record<string, unknown> | undefined;
+        const p = params.pickup   as Record<string, unknown> | undefined;
         const d = params.delivery as Record<string, unknown> | undefined;
-        // Get amount from quote — fetch quote details using the PRICING_ ID
-        let amount_usd: number | undefined;
-        try {
-          const quoteId = params.quote_id as string;
-          if (quoteId?.startsWith('PRICING_')) {
-            // The quote amount is embedded in the quote ID lookup via Warp API
-            // We store it from the ltlQuote response via a module-level cache
-            amount_usd = quoteAmountCache.get(quoteId);
-          }
-        } catch { /* non-critical */ }
+        const amount_usd = quoteAmountCache.get(params.quote_id as string);
         trackEvent({
           product: 'warp-agent',
           source: 'mcp',

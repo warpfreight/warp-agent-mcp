@@ -1,6 +1,7 @@
 /**
- * WarpClient for MCP — direct against gw.wearewarp.com.
- * Auth: apikey header (same key as customer.wearewarp.com/dashboard/developer).
+ * WarpClient for MCP — routes quotes and booking through the Warp self-serve
+ * API endpoints (www.wearewarp.com/api/v1/{mode}/quote, /api/v1/book).
+ * Auth: Bearer wak_live_* or wak_test_* key.
  */
 export declare class WarpApiError extends Error {
     status: number;
@@ -22,105 +23,24 @@ export declare class WarpClient {
     private rememberQuote;
     private headers;
     private request;
-    vanQuote(params: Record<string, unknown>): Promise<{
-        warp_quote_id: string | null;
-        warp_price: {} | null;
-        warp_transit_days: {} | null;
-        options: Record<string, unknown>[];
-        _items: unknown[];
-        _note: string;
-    } | {
-        warp_quote_id: string | null;
-        warp_price: number | null;
-        warp_transit_days: number | null;
-        options: {
-            source: {};
-            id: {};
-            carrierName: {};
-            transitTime: number;
-            rate: number;
-            serviceLevel: {};
-            shipmentType: string;
-        }[];
-        _note: string;
-    }>;
-    boxTruckQuote(params: Record<string, unknown>): Promise<{
-        warp_quote_id: string | null;
-        warp_price: {} | null;
-        warp_transit_days: {} | null;
-        options: Record<string, unknown>[];
-        _items: unknown[];
-        _note: string;
-    } | {
-        warp_quote_id: string | null;
-        warp_price: number | null;
-        warp_transit_days: number | null;
-        options: {
-            source: {};
-            id: {};
-            carrierName: {};
-            transitTime: number;
-            rate: number;
-            serviceLevel: {};
-            shipmentType: string;
-        }[];
-        _note: string;
-    }>;
-    ftlQuote(params: Record<string, unknown>): Promise<{
-        warp_quote_id: string | null;
-        warp_price: number | null;
-        warp_transit_days: number | null;
-        options: {
-            source: {};
-            id: {};
-            carrierName: {};
-            transitTime: number;
-            rate: number;
-            serviceLevel: {};
-            shipmentType: string;
-        }[];
-        _note: string;
-    }>;
-    private _dualQuote;
-    ltlQuote(params: Record<string, unknown>, _originZip?: string, _destZip?: string): Promise<{
-        warp_quote_id: string | null;
-        warp_price: {} | null;
-        warp_transit_days: {} | null;
-        options: Record<string, unknown>[];
-        _items: unknown[];
-        _note: string;
-    } | {
-        warp_quote_id: string | null;
-        warp_price: number | null;
-        warp_transit_days: number | null;
-        options: {
-            source: {};
-            id: {};
-            carrierName: {};
-            transitTime: number;
-            rate: number;
-            serviceLevel: {};
-            shipmentType: string;
-        }[];
-        _note: string;
-    }>;
-    private _publicQuote;
-    private _oldLtlQuote;
-    _deadcode(params: Record<string, unknown>): Promise<unknown>;
     /**
-     * Book a quoted shipment via /warp/freights/booking — the booking endpoint
-     * in the SAME system as our quote endpoint (/warp/freights/quote), so the
-     * PRICING_… / market-option ids we cache are valid here.
-     *
-     * NOTE on atomicity: this endpoint books only; the card is charged
-     * separately by the caller (tools.ts → /agents/charge-me) BEFORE this runs.
-     * That ordering carries a known risk — a booking failure after a successful
-     * charge leaves the customer charged with no shipment. The atomic
-     * /freight/book endpoint avoids that, but it lives in a DIFFERENT system
-     * (paired with /freight/quote, which returns no market options) and does not
-     * accept PRICING_ ids from /warp/freights/quote. Reconciling the two
-     * systems (so we get atomicity without losing market quotes) is a backend
-     * task — see the note in tools.ts warp_book.
+     * Route a quote through the warp-site self-serve API endpoints
+     * (www.wearewarp.com/api/v1/{mode}/quote). These use the working upstream
+     * public search endpoint and accept Bearer wak_live_* / wak_test_* auth.
+     * After Troy's next.config.ts rewrite cutover, /api/v1/* on warp-site will
+     * proxy to warp-freight-api.vercel.app — no MCP change needed at that point.
+     */
+    private get selfServeOrigin();
+    private _selfServeQuote;
+    vanQuote(params: Record<string, unknown>): Promise<unknown>;
+    boxTruckQuote(params: Record<string, unknown>): Promise<unknown>;
+    ftlQuote(params: Record<string, unknown>): Promise<unknown>;
+    ltlQuote(params: Record<string, unknown>, _originZip?: string, _destZip?: string): Promise<unknown>;
+    /**
+     * Book a quoted shipment via the self-serve /api/v1/book endpoint.
+     * Atomic: Stripe charge + gw.wearewarp.com booking in one server-side call.
+     * tools.ts no longer pre-charges via /agents/charge-me — payment is handled
+     * internally by /api/v1/book using the agent\'s saved card.
      */
     book(params: Record<string, unknown>): Promise<unknown>;
     listBookings(limit?: number): Promise<unknown>;

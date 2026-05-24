@@ -16,21 +16,21 @@ export declare const VanQuoteInput: z.ZodObject<{
         delivery?: string[] | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    pallets: number;
-    weight_lbs_per_pallet: number;
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
+    pallets: number;
+    weight_lbs_per_pallet: number;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;
     } | undefined;
 }, {
-    pallets: number;
-    weight_lbs_per_pallet: number;
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
+    pallets: number;
+    weight_lbs_per_pallet: number;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;
@@ -53,21 +53,21 @@ export declare const BoxTruckQuoteInput: z.ZodObject<{
         delivery?: string[] | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    pallets: number;
-    weight_lbs_per_pallet: number;
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
+    pallets: number;
+    weight_lbs_per_pallet: number;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;
     } | undefined;
 }, {
-    pallets: number;
-    weight_lbs_per_pallet: number;
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
+    pallets: number;
+    weight_lbs_per_pallet: number;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;
@@ -90,9 +90,9 @@ export declare const FtlQuoteInput: z.ZodObject<{
         delivery?: string[] | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
     pallets?: number | undefined;
     weight_lbs_per_pallet?: number | undefined;
     accessorials?: {
@@ -100,9 +100,9 @@ export declare const FtlQuoteInput: z.ZodObject<{
         delivery?: string[] | undefined;
     } | undefined;
 }, {
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
     pallets?: number | undefined;
     weight_lbs_per_pallet?: number | undefined;
     accessorials?: {
@@ -134,35 +134,35 @@ export declare const LtlQuoteInput: z.ZodObject<{
         delivery?: string[] | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
     pallets?: number | undefined;
     weight_lbs_per_pallet?: number | undefined;
     commodity?: string | undefined;
+    freight_class?: string | undefined;
+    hazmat?: boolean | undefined;
+    stackable?: boolean | undefined;
     length_in?: number | undefined;
     width_in?: number | undefined;
     height_in?: number | undefined;
-    stackable?: boolean | undefined;
-    hazmat?: boolean | undefined;
-    freight_class?: string | undefined;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;
     } | undefined;
 }, {
-    pickup_date: string;
     origin_zip: string;
     destination_zip: string;
+    pickup_date: string;
     pallets?: number | undefined;
     weight_lbs_per_pallet?: number | undefined;
     commodity?: string | undefined;
+    freight_class?: string | undefined;
+    hazmat?: boolean | undefined;
+    stackable?: boolean | undefined;
     length_in?: number | undefined;
     width_in?: number | undefined;
     height_in?: number | undefined;
-    stackable?: boolean | undefined;
-    hazmat?: boolean | undefined;
-    freight_class?: string | undefined;
     accessorials?: {
         pickup?: string[] | undefined;
         delivery?: string[] | undefined;

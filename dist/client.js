@@ -1,6 +1,7 @@
 /**
- * WarpClient for MCP — direct against gw.wearewarp.com.
- * Auth: apikey header (same key as customer.wearewarp.com/dashboard/developer).
+ * WarpClient for MCP — routes quotes and booking through the Warp self-serve
+ * API endpoints (www.wearewarp.com/api/v1/{mode}/quote, /api/v1/book).
+ * Auth: Bearer wak_live_* or wak_test_* key.
  */
 export class WarpApiError extends Error {
     status;
@@ -74,6 +75,7 @@ export class WarpClient {
             headers: this.headers(opts?.auth ?? false),
             body: opts?.body ? JSON.stringify(opts.body) : undefined,
             redirect: "follow",
+            signal: AbortSignal.timeout(25000),
         });
         const text = await res.text();
         let json;
@@ -87,353 +89,155 @@ export class WarpClient {
             throw new WarpApiError(res.status, json);
         return json;
     }
-    // ── Quote (public) ────────────────────────────────────────────
-    async vanQuote(params) {
-        const key = this.getApiKey();
-        if (key) {
-            const listItems = [{ name: "Pallet", quantity: params.pallets ?? 1, totalWeight: (params.pallets ?? 1) * (params.weight_lbs_per_pallet ?? 200), weightUnit: "lbs", length: 48, width: 40, height: 48, sizeUnit: "IN", stackable: false }];
-            return this._dualQuote(params, listItems, params.pickup_services ?? [], params.delivery_services ?? []);
+    // ── Quote (self-serve API) ─────────────────────────────────────
+    /**
+     * Route a quote through the warp-site self-serve API endpoints
+     * (www.wearewarp.com/api/v1/{mode}/quote). These use the working upstream
+     * public search endpoint and accept Bearer wak_live_* / wak_test_* auth.
+     * After Troy's next.config.ts rewrite cutover, /api/v1/* on warp-site will
+     * proxy to warp-freight-api.vercel.app — no MCP change needed at that point.
+     */
+    get selfServeOrigin() {
+        try {
+            return new URL(this.base).origin;
         }
-        return this._publicQuote(params, "FTL", "CARGO_VAN");
+        catch {
+            return "https://www.wearewarp.com";
+        }
+    }
+    async _selfServeQuote(mode, params) {
+        const key = this.getApiKey();
+        const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
+        // Forward all recognised params; the route ignores unknowns
+        const body = {};
+        for (const k of [
+            "origin_zip", "destination_zip", "pickup_date",
+            "pallets", "weight_lbs_per_pallet", "commodity",
+            "freight_class", "hazmat", "stackable",
+            "length_in", "width_in", "height_in",
+            "pickup_services", "delivery_services",
+        ]) {
+            if (params[k] !== undefined)
+                body[k] = params[k];
+        }
+        const headers = { "Content-Type": "application/json" };
+        if (key)
+            headers["Authorization"] = `Bearer ${key}`;
+        const res = await fetch(url, {
+            method: "POST", headers, body: JSON.stringify(body),
+            signal: AbortSignal.timeout(25000),
+        });
+        if (!res.ok) {
+            const txt = await res.text().catch(() => res.statusText);
+            throw new WarpApiError(res.status, txt);
+        }
+        const data = await res.json();
+        const quoteId = data.quote_id ?? null;
+        const priceUsd = data.price_usd ?? null;
+        const transitDays = data.transit_days ?? null;
+        const hasQuote = !!quoteId;
+        // Cache context so book() can reference it without re-quoting
+        if (hasQuote) {
+            this.rememberQuote([quoteId], {
+                items: [],
+                pickupDate: params.pickup_date,
+                pallets: params.pallets,
+                weightPerPallet: params.weight_lbs_per_pallet,
+            });
+        }
+        const originZip = String(params.origin_zip ?? "");
+        const destZip = String(params.destination_zip ?? "");
+        return {
+            // Standard MCP quote fields (tools.ts reads these for quoteAmountCache)
+            warp_quote_id: quoteId,
+            warp_price: priceUsd,
+            warp_transit_days: transitDays,
+            options: [],
+            // Pass self-serve response fields through for warp_book and display
+            ...(hasQuote ? {
+                quote_id: quoteId,
+                price_usd: priceUsd,
+                transit_days: transitDays,
+                pickup_date: data.pickup_date,
+                delivery_date: data.delivery_date,
+                expires_at: data.expires_at,
+                quote_tier: data.quote_tier,
+                service: data.service,
+                assumptions: data.assumptions,
+                missing_for_ship: data.missing_for_ship,
+                booking_url: data.booking_url,
+                book_tool_call: data.book_tool_call,
+                payment_ready: data.payment_ready,
+            } : {}),
+            _note: hasQuote
+                ? `Warp ${mode.toUpperCase()} quote_id: ${quoteId} — use this id with warp_book to book`
+                : `No Warp coverage on this lane (${originZip} → ${destZip}). ${data.error ?? ""}`,
+        };
+    }
+    async vanQuote(params) {
+        return this._selfServeQuote("van", params);
     }
     async boxTruckQuote(params) {
-        const key = this.getApiKey();
-        if (key) {
-            const listItems = [{ name: "Pallet", quantity: params.pallets ?? 1, totalWeight: (params.pallets ?? 1) * (params.weight_lbs_per_pallet ?? 500), weightUnit: "lbs", length: 48, width: 40, height: 48, sizeUnit: "IN", stackable: false }];
-            return this._dualQuote(params, listItems, params.pickup_services ?? [], params.delivery_services ?? []);
-        }
-        return this._publicQuote(params, "FTL", "STRAIGHT_TRUCK_26");
+        return this._selfServeQuote("box-truck", params);
     }
     async ftlQuote(params) {
-        const pallets = params.pallets || 1;
-        const weight = params.weight_lbs_per_pallet || 1000;
-        const originZip = String(params.origin_zip ?? "");
-        const destZip = String(params.destination_zip ?? "");
-        // FTL uses the public search endpoint with shipmentType + vehicleType
-        const PUBLIC_FTL_URL = "https://gw.wearewarp.com/api/v1/p/customer-cli/freight-quote/search";
-        const PUBLIC_KEY = "warp-public-freight-quote@wearewarp.com";
-        const body = {
-            key: PUBLIC_KEY,
-            shipmentType: "FTL",
-            vehicleType: { code: params.vehicle_type || "DRY_VAN_53" },
-            pickZipcode: originZip,
-            dropZipcode: destZip,
-            pickDate: params.pickup_date,
-            packaging: {
-                ltlItems: [{ name: "Freight", length: 48, width: 40, height: 48, qty: pallets, qtyUnit: "Pallet", weightPerUnit: weight, weightUnit: "lbs", weightTotal: pallets * weight }],
-            },
-            isHazardous: false,
-            isTemperatureControlled: false,
-            pickupServices: [],
-            dropoffServices: [],
-        };
-        const res = await fetch(PUBLIC_FTL_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok)
-            throw new Error(`FTL quote failed: ${res.status}`);
-        const data = await res.json();
-        const rawQuotes = data?.data?.quote ?? [];
-        // Find Warp quote vs market
-        const getOpt = (q) => q?.warpQuote?.option ?? {};
-        const getRate = (opt) => opt?.rate?.avg ?? 0;
-        const warpQuote = rawQuotes.find((q) => getOpt(q)?.carrierName?.toString().toLowerCase().includes('warp'));
-        const marketOpts = rawQuotes
-            .filter((q) => !getOpt(q)?.carrierName?.toString().toLowerCase().includes('warp'))
-            .map((q) => {
-            const raw = q;
-            const opt = getOpt(raw);
-            return {
-                source: opt?.source || "market",
-                id: opt?.id || "",
-                carrierName: opt?.carrierName || "Unknown",
-                transitTime: (raw?.transitDay ?? 0) * 86400,
-                rate: getRate(opt),
-                serviceLevel: opt?.serviceLevel || "STANDARD",
-                shipmentType: "FTL",
-            };
-        });
-        const hasWarp = !!warpQuote;
-        const warpOpt = hasWarp ? getOpt(warpQuote) : {};
-        const warpPrice = getRate(warpOpt);
-        const warpId = warpOpt?.id ?? null;
-        const warpTransit = warpQuote?.transitDay ?? null;
-        return {
-            warp_quote_id: hasWarp ? warpId : null,
-            warp_price: hasWarp ? warpPrice : null,
-            warp_transit_days: hasWarp ? warpTransit : null,
-            options: marketOpts,
-            _note: hasWarp
-                ? `Warp FTL quote_id: ${warpId} \u2014 use this id with warp_book to book`
-                : `No Warp FTL coverage on this lane (${originZip} \u2192 ${destZip}). Market options shown for reference.`,
-        };
-    }
-    async _dualQuote(params, listItems, pickupServices = [], deliveryServices = []) {
-        const originZip = String(params.origin_zip ?? "");
-        const destZip = String(params.destination_zip ?? "");
-        const [warpResult, marketResult] = await Promise.allSettled([
-            this.request("POST", "/freights/quote", {
-                body: { pickupDate: params.pickup_date, pickupInfo: { zipcode: originZip }, deliveryInfo: { zipcode: destZip }, listItems },
-                auth: true,
-            }),
-            this.request("POST", "/freights/freight-quote", {
-                body: { pickupDate: params.pickup_date, pickupInfo: { zipcode: originZip }, deliveryInfo: { zipcode: destZip }, items: listItems, pickupServices, dropoffServices: deliveryServices },
-                auth: true,
-            }),
-        ]);
-        // If both calls failed with auth errors, surface a clear login prompt instead of empty results
-        const warpErr = warpResult.status === "rejected" ? warpResult.reason : null;
-        const marketErr = marketResult.status === "rejected" ? marketResult.reason : null;
-        if (warpErr instanceof WarpApiError && marketErr instanceof WarpApiError &&
-            (warpErr.status === 401 || warpErr.status === 403) &&
-            (marketErr.status === 401 || marketErr.status === 403)) {
-            throw new Error("API key invalid or not configured. Run \`warp-agent login\` first, then restart your AI client.");
-        }
-        const warp = warpResult.status === "fulfilled" ? warpResult.value : null;
-        const market = marketResult.status === "fulfilled" ? marketResult.value : null;
-        const hasWarp = !!(warp?.quote_id);
-        const options = market?.options ?? [];
-        // Cache freight context against every id returned (warp's PRICING_… plus
-        // every market option id) so book() can rebuild the atomic /freight/book
-        // payload (pallets, weight, pickup date) without the caller re-supplying
-        // freight details the quote already pinned down.
-        const firstItem = (listItems[0] ?? {});
-        const pallets = Number(firstItem.quantity ?? 0) || undefined;
-        const totalWeight = Number(firstItem.totalWeight ?? 0);
-        const weightPerPallet = pallets && totalWeight > 0 ? Math.round(totalWeight / pallets) : undefined;
-        this.rememberQuote([hasWarp ? warp.quote_id : undefined, ...options.map((o) => o.id)], { items: listItems, pickupDate: params.pickup_date, pallets, weightPerPallet });
-        return {
-            warp_quote_id: hasWarp ? warp.quote_id : null,
-            warp_price: hasWarp ? (warp.price?.amount ?? null) : null,
-            warp_transit_days: hasWarp ? (warp.transit_time ?? null) : null,
-            options,
-            _items: listItems,
-            _note: hasWarp
-                ? `Warp quote_id: ${warp.quote_id} \u2014 use this id with warp_book to book`
-                : `Warp does not have direct coverage on this lane (${originZip} \u2192 ${destZip}). Market options shown for reference. Do not recommend any carrier \u2014 present the data and let the user decide.`,
-        };
+        // Previously called gw.wearewarp.com/api/v1/p/customer-cli/freight-quote/search
+        // directly (404 as of 2026-05). Now routes through self-serve API like all modes.
+        return this._selfServeQuote("ftl", params);
     }
     async ltlQuote(params, _originZip, _destZip) {
-        const key = this.getApiKey();
-        if (key)
-            return this._dualQuote(params, [{
-                    name: params.commodity || "Freight",
-                    quantity: params.pallets ?? 1,
-                    totalWeight: (params.pallets ?? 1) * (params.weight_lbs_per_pallet ?? 500),
-                    weightUnit: "lbs",
-                    length: params.length_in ?? 48,
-                    width: params.width_in ?? 40,
-                    height: params.height_in ?? 48,
-                    sizeUnit: "IN",
-                    stackable: params.stackable ?? false,
-                }], params.pickup_services ?? [], params.delivery_services ?? []);
-        return this._publicQuote(params, "LTL");
-    }
-    async _publicQuote(params, shipmentType, vehicleTypeCode) {
-        const originZip = String(params.origin_zip ?? params.origin_zip ?? "");
-        const destZip = String(params.destination_zip ?? "");
-        const pallets = params.pallets || 1;
-        const weight = params.weight_lbs_per_pallet || 300;
-        const commodity = params.commodity || "Freight";
-        const length = params.length_in || 48;
-        const width = params.width_in || 40;
-        const height = params.height_in || 48;
-        const PUBLIC_URL = "https://gw.wearewarp.com/api/v1/p/customer-cli/freight-quote/search";
-        const PUBLIC_KEY = "warp-public-freight-quote@wearewarp.com";
-        const body = {
-            key: PUBLIC_KEY,
-            shipmentType,
-            pickZipcode: originZip,
-            dropZipcode: destZip,
-            pickDate: params.pickup_date,
-            packaging: {
-                ltlItems: [{ name: commodity, length, width, height, qty: pallets, qtyUnit: "Pallet", weightPerUnit: weight, weightUnit: "lbs", weightTotal: pallets * weight }],
-            },
-            isHazardous: !!(params.hazmat),
-            isTemperatureControlled: false,
-            pickupServices: params.pickup_services ?? [],
-            dropoffServices: params.delivery_services ?? [],
-        };
-        if (vehicleTypeCode)
-            body.vehicleType = { code: vehicleTypeCode };
-        const res = await fetch(PUBLIC_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok)
-            throw new Error(`Quote failed: ${res.status}`);
-        const data = await res.json();
-        const rawQuotes = data?.data?.quote ?? [];
-        const isWarpQuote = (q) => {
-            const r = q;
-            const src = String(r?.source ?? "").toUpperCase();
-            const warpOpt = r?.warpQuote?.option;
-            return src === "WARP" || warpOpt?.carrierName?.toString().toLowerCase().includes("warp");
-        };
-        const getRate = (q) => {
-            const r = q;
-            const tc = r?.total_charge;
-            if (tc?.value)
-                return Math.round(tc.value / 100 * 100) / 100; // US_cent to USD
-            const warpOpt = r?.warpQuote?.option;
-            const rateObj = warpOpt?.rate;
-            return rateObj?.avg ?? 0;
-        };
-        const getQuoteId = (q) => {
-            const r = q;
-            return r?.warpQuote?.option
-                ? String(r?.warpQuote?.option?.id ?? "")
-                : null;
-        };
-        const getTransit = (q) => {
-            const r = q;
-            return r?.transitDay ?? null;
-        };
-        const warpQuote = rawQuotes.find(isWarpQuote);
-        const marketOpts = rawQuotes
-            .filter(q => !isWarpQuote(q))
-            .map(q => {
-            const r = q;
-            const opt = r?.warpQuote?.option ?? r;
-            return {
-                source: r?.source || opt?.source || "market",
-                id: opt?.id || "",
-                carrierName: opt?.carrierName || r?.scac || "Unknown",
-                transitTime: (r?.transitDay ?? 0) * 86400,
-                rate: getRate(q),
-                serviceLevel: opt?.serviceLevel || "STANDARD",
-                shipmentType,
-            };
-        });
-        const hasWarp = !!warpQuote;
-        const warpRate = hasWarp ? getRate(warpQuote) : null;
-        const warpId = hasWarp ? getQuoteId(warpQuote) : null;
-        const warpTransit = hasWarp ? getTransit(warpQuote) : null;
-        return {
-            warp_quote_id: warpId,
-            warp_price: warpRate,
-            warp_transit_days: warpTransit,
-            options: marketOpts,
-            _note: hasWarp
-                ? `Warp quote_id: ${warpId} — use this id with warp_book to book`
-                : `No Warp coverage on this lane (${originZip} → ${destZip}). Market options shown for reference.`,
-        };
-    }
-    async _oldLtlQuote(params, originZip, destZip) {
-        const listItems = [{
-                name: params.commodity || "Freight",
-                quantity: params.pallets ?? 1,
-                totalWeight: (params.pallets ?? 1) * (params.weight_lbs_per_pallet ?? 500),
-                weightUnit: "lbs",
-                length: params.length_in ?? 48,
-                width: params.width_in ?? 40,
-                height: params.height_in ?? 48,
-                sizeUnit: "IN",
-                stackable: params.stackable ?? false,
-            }];
-        const pickupServices = params.pickup_services ?? [];
-        const deliveryServices = params.delivery_services ?? [];
-        // Run both in parallel: primary Warp quote (bookable) + market comparison
-        const [warpResult, marketResult] = await Promise.allSettled([
-            this.request("POST", "/freights/quote", {
-                body: { pickupDate: params.pickup_date, pickupInfo: { zipcode: params.origin_zip }, deliveryInfo: { zipcode: params.destination_zip }, listItems },
-                auth: true,
-            }),
-            this.request("POST", "/freights/freight-quote", {
-                body: { pickupDate: params.pickup_date, pickupInfo: { zipcode: params.origin_zip }, deliveryInfo: { zipcode: params.destination_zip }, items: listItems, pickupServices, dropoffServices: deliveryServices },
-                // shipmentType omitted — "LTL" returns 0 options, omitting returns all carriers
-                auth: true,
-            }),
-        ]);
-        // Surface auth errors clearly instead of returning empty results
-        const warpErr = warpResult.status === "rejected" ? warpResult.reason : null;
-        const marketErr = marketResult.status === "rejected" ? marketResult.reason : null;
-        if (warpErr instanceof WarpApiError && marketErr instanceof WarpApiError &&
-            (warpErr.status === 401 || warpErr.status === 403) &&
-            (marketErr.status === 401 || marketErr.status === 403)) {
-            throw new Error("API key invalid or not configured. Run \`warp-agent login\` first, then restart your AI client.");
-        }
-        const warp = warpResult.status === "fulfilled" ? warpResult.value : null;
-        const market = marketResult.status === "fulfilled" ? marketResult.value : null;
-        // Return combined result
-        const marketOptions = market?.options ?? [];
-        const hasWarp = !!(warp?.quote_id);
-        return {
-            warp_quote_id: hasWarp ? warp.quote_id : null,
-            warp_price: hasWarp ? (warp.price?.amount ?? null) : null,
-            warp_transit_days: hasWarp ? (warp.transit_time ?? null) : null,
-            options: marketOptions,
-            _items: listItems,
-            _note: hasWarp
-                ? `Warp quote_id: ${warp.quote_id} — use this id with warp_book to book`
-                : `Warp does not have direct coverage on this lane (${originZip} \u2192 ${destZip}). Market options are shown for reference. Do not recommend any carrier over another — present the data and let the user decide.`,
-        };
-    }
-    _deadcode(params) {
-        return this.request("POST", "/freights/freight-quote", {
-            body: {},
-            auth: true,
-        });
+        return this._selfServeQuote("ltl", params);
     }
     // ── Booking (auth) ────────────────────────────────────────────
     /**
-     * Book a quoted shipment via /warp/freights/booking — the booking endpoint
-     * in the SAME system as our quote endpoint (/warp/freights/quote), so the
-     * PRICING_… / market-option ids we cache are valid here.
-     *
-     * NOTE on atomicity: this endpoint books only; the card is charged
-     * separately by the caller (tools.ts → /agents/charge-me) BEFORE this runs.
-     * That ordering carries a known risk — a booking failure after a successful
-     * charge leaves the customer charged with no shipment. The atomic
-     * /freight/book endpoint avoids that, but it lives in a DIFFERENT system
-     * (paired with /freight/quote, which returns no market options) and does not
-     * accept PRICING_ ids from /warp/freights/quote. Reconciling the two
-     * systems (so we get atomicity without losing market quotes) is a backend
-     * task — see the note in tools.ts warp_book.
+     * Book a quoted shipment via the self-serve /api/v1/book endpoint.
+     * Atomic: Stripe charge + gw.wearewarp.com booking in one server-side call.
+     * tools.ts no longer pre-charges via /agents/charge-me — payment is handled
+     * internally by /api/v1/book using the agent\'s saved card.
      */
-    book(params) {
+    async book(params) {
+        const key = this.getApiKey();
+        const url = `${this.selfServeOrigin}/api/v1/book`;
         const pickup = params.pickup;
         const delivery = params.delivery;
-        const defaultWindow = () => {
-            const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-            return { from: `${tomorrow}T08:00:00.000Z`, to: `${tomorrow}T17:00:00.000Z` };
-        };
-        const buildStop = (addr) => ({
-            locationName: addr.company || addr.contactName,
-            contactName: addr.contactName,
-            contactPhone: addr.phone,
-            contactEmail: addr.email,
-            address: {
-                street: addr.street,
-                city: addr.city,
-                state: addr.state,
-                zipcode: addr.zipCode,
-                country: "US",
-            },
-            windowTime: defaultWindow(),
+        // Map MCP address schema (zipCode, contactName) → self-serve API (zip, contact)
+        const mapAddr = (addr) => ({
+            street: addr.street,
+            city: addr.city,
+            state: addr.state,
+            zip: addr.zipCode ?? addr.zip,
+            contact: addr.contactName ?? addr.contact,
+            phone: addr.phone,
+            email: addr.email,
+            ...(addr.company ? { company: addr.company } : {}),
         });
-        // listItems must match what was quoted (the gateway rejects mismatches).
-        // Pull from the quote-context cache populated at quote time.
-        const ctx = this.quoteCtxCache.get(params.quote_id);
-        const items = params.items
-            || ctx?.items
-            || [{ name: "Freight", quantity: 1, totalWeight: 200, weightUnit: "lbs", length: 48, width: 40, height: 48, sizeUnit: "IN", stackable: false }];
-        const body = {
-            quoteId: params.quote_id,
-            listItems: items,
-        };
+        const body = { quoteId: params.quote_id };
         if (pickup)
-            body.pickupInfo = buildStop(pickup);
+            body.pickup = mapAddr(pickup);
         if (delivery)
-            body.deliveryInfo = buildStop(delivery);
+            body.delivery = mapAddr(delivery);
         if (params.reference)
-            body.referenceNo = params.reference;
+            body.reference = params.reference;
         if (params.notes)
-            body.note = params.notes;
-        return this.request("POST", "/freights/booking", { body, auth: true });
+            body.notes = params.notes;
+        const headers = { "Content-Type": "application/json" };
+        if (key)
+            headers["Authorization"] = `Bearer ${key}`;
+        const res = await fetch(url, {
+            method: "POST", headers, body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30000),
+        });
+        const text = await res.text();
+        let json;
+        try {
+            json = JSON.parse(text);
+        }
+        catch {
+            json = { raw: text };
+        }
+        if (!res.ok)
+            throw new WarpApiError(res.status, json);
+        return json;
     }
     // ── Shipments list (auth) ─────────────────────────────────────
     listBookings(limit) {

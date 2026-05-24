@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WarpClient } from "./client.js";
 import { registerTools } from "./tools.js";
+import { QUOTE_CARD_RESOURCE_URI, quoteCardTemplate } from "./widgets/quote-card.js";
 
 // Node 20+ is required for native fetch and the MCP SDK. npx -y ignores the
 // "engines" field, so a user on an older Node crashes with a cryptic
@@ -112,6 +113,23 @@ const server = new McpServer({
 const client = new WarpClient(WARP_API_URL, loadApiKey);
 
 registerTools(server, client, loadApiKey);
+
+// Inline widget resources. ChatGPT's Apps SDK fetches these once via
+// resources/read and re-renders per tool call with structuredContent; Claude
+// inlines rendered HTML per tool response, so these are a no-op for Claude but
+// harmless. Clients without UI support ignore them entirely.
+server.registerResource(
+  "warp-quote-card",
+  QUOTE_CARD_RESOURCE_URI,
+  {
+    description:
+      "Inline quote card shown after warp_van_quote / warp_box_truck_quote / warp_ftl_quote / warp_ltl_quote. Renders rate, lane, transit, expiration countdown, and a Book CTA.",
+    mimeType: "text/html",
+  },
+  async () => ({
+    contents: [{ uri: QUOTE_CARD_RESOURCE_URI, mimeType: "text/html", text: quoteCardTemplate() }],
+  }),
+);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
