@@ -11,6 +11,7 @@ export interface QuoteWidgetData {
     transit_days: number;
     expires_at: string;
     vehicle_label: string;
+    payment_ready: boolean;
 }
 export declare const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
 export declare function toWidgetData(mode: QuoteMode, input: {

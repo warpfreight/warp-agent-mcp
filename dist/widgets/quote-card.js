@@ -42,6 +42,7 @@ export function toWidgetData(mode, input, response) {
         transit_days: transit,
         expires_at: expires,
         vehicle_label: vehicle,
+        payment_ready: response.payment_ready === true,
     };
 }
 // Inline HTML template. CSS + JS live inside the document so the widget renders
@@ -263,7 +264,7 @@ html, body {
     Book this rate <span class="warp-book-arrow">→</span>
   </a>
 
-  <div class="warp-footer">
+  <div class="warp-footer" id="__warp_footer">
     Booking opens at <a href="https://customer.wearewarp.com" target="_blank" rel="noopener">customer.wearewarp.com</a>. Card required at checkout.
   </div>
 </div>
@@ -308,6 +309,14 @@ ${jsonScriptTag}
   document.getElementById("__warp_vehicle").textContent = data.vehicle_label || MODE_LABEL[data.mode] || "--";
   document.getElementById("__warp_pickup").textContent = fmtDate(data.pickup_date);
   document.getElementById("__warp_delivery").textContent = fmtDate(data.delivery_date);
+
+  // Footer adapts to whether a card is already on file. Authed quotes carry
+  // payment_ready:true; keyless/anon quotes omit it, so they keep the default
+  // "card required at checkout" guidance.
+  var footerEl = document.getElementById("__warp_footer");
+  if (footerEl && data.payment_ready) {
+    footerEl.innerHTML = 'Card on file, ready to book at <a href="https://customer.wearewarp.com" target="_blank" rel="noopener">customer.wearewarp.com</a>.';
+  }
 
   // Build the deep-link per the canonical schema (auto-fires the portal quote).
   var params = new URLSearchParams();

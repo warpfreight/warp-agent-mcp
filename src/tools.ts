@@ -357,7 +357,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
         const apiKey = WARP_API_KEY();
         if (!apiKey) {
-          return { content: [{ type: "text", text: "No API key found. Run warp-agent login first." }], isError: true };
+          return { content: [{ type: "text", text: "Booking requires your own Warp account with a card on file. Quoting is free and needs no key, but booking charges your card, so you need to sign in first. New to Warp? Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
         }
 
         // /api/v1/book is atomic: Stripe charge + gw booking in one call.

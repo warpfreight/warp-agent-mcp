@@ -200,26 +200,34 @@ export class WarpClient {
         const url = `${this.selfServeOrigin}/api/v1/book`;
         const pickup = params.pickup;
         const delivery = params.delivery;
-        // Map MCP address schema (zipCode, contactName) → self-serve API (zip, contact)
+        // Body shape per openapi.json + the live /api/v1/book route: snake_case
+        // `quote_id`, addresses nested under `patch.{pickup,delivery}` using the
+        // addressSchema field names (zipCode, contactName, …), `reference` top-level,
+        // `notes` under patch. The previous shape (quoteId / top-level pickup / zip+
+        // contact) silently failed every booking with INVALID_QUOTE_ID.
         const mapAddr = (addr) => ({
-            street: addr.street,
+            zipCode: addr.zipCode ?? addr.zip,
             city: addr.city,
             state: addr.state,
-            zip: addr.zipCode ?? addr.zip,
-            contact: addr.contactName ?? addr.contact,
+            street: addr.street,
+            contactName: addr.contactName ?? addr.contact,
             phone: addr.phone,
             email: addr.email,
+            ...(addr.specialInstruction ? { specialInstruction: addr.specialInstruction } : {}),
             ...(addr.company ? { company: addr.company } : {}),
         });
-        const body = { quoteId: params.quote_id };
+        const body = { quote_id: params.quote_id };
+        const patch = {};
         if (pickup)
-            body.pickup = mapAddr(pickup);
+            patch.pickup = mapAddr(pickup);
         if (delivery)
-            body.delivery = mapAddr(delivery);
+            patch.delivery = mapAddr(delivery);
+        if (params.notes)
+            patch.notes = params.notes;
+        if (Object.keys(patch).length > 0)
+            body.patch = patch;
         if (params.reference)
             body.reference = params.reference;
-        if (params.notes)
-            body.notes = params.notes;
         const headers = { "Content-Type": "application/json" };
         if (key)
             headers["Authorization"] = `Bearer ${key}`;
