@@ -315,6 +315,12 @@ export function registerTools(server, client, getApiKey) {
         delivery: deliverySchema.optional().describe("Delivery address. Required if this lane has not been shipped before."),
         notes: z.string().optional().describe("Special instructions for the shipment"),
         reference: z.string().optional().describe("Your internal reference number"),
+        accessorials: z.object({
+            pickup: z.array(z.string()).optional().describe("Pickup accessorials: liftgate-pickup, residential-pickup, inside-pickup, limited-access-pickup, pickup-appointment"),
+            delivery: z.array(z.string()).optional().describe("Delivery accessorials: liftgate-delivery, residential-delivery, inside-delivery, limited-access-delivery, delivery-appointment"),
+        }).optional().describe("Pickup/delivery accessorial services. Should match the accessorials used when quoting."),
+        pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Pickup time window, 24h HH:MM, e.g. { from: '08:00', to: '17:00' }. Defaults to a full business day if omitted."),
+        delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Delivery time window, 24h HH:MM, e.g. { from: '09:00', to: '12:00' }. Defaults to a full business day if omitted."),
     }, { title: "Book Shipment", destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
@@ -337,6 +343,9 @@ export function registerTools(server, client, getApiKey) {
                 ...(params.delivery ? { delivery: params.delivery } : {}),
                 ...(params.notes ? { notes: params.notes } : {}),
                 ...(params.reference ? { reference: params.reference } : {}),
+                ...(params.accessorials ? { accessorials: params.accessorials } : {}),
+                ...(params.pickup_window ? { pickup_window: params.pickup_window } : {}),
+                ...(params.delivery_window ? { delivery_window: params.delivery_window } : {}),
             };
             let data;
             try {

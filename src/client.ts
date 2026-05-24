@@ -249,6 +249,11 @@ export class WarpClient {
     if (params.notes)  patch.notes    = params.notes;
     if (Object.keys(patch).length > 0) body.patch = patch;
     if (params.reference) body.reference = params.reference;
+    // Top-level per the /api/v1/book contract: accessorials {pickup[],delivery[]}
+    // and optional pickup_window/delivery_window ({from,to} as HH:MM).
+    if (params.accessorials)    body.accessorials    = params.accessorials;
+    if (params.pickup_window)   body.pickup_window   = params.pickup_window;
+    if (params.delivery_window) body.delivery_window = params.delivery_window;
 
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
