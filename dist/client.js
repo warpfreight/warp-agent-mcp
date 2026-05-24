@@ -120,6 +120,16 @@ export class WarpClient {
             if (params[k] !== undefined)
                 body[k] = params[k];
         }
+        // The quote route reads accessorials as body.accessorials {pickup, delivery}
+        // (same shape as /book), not the flat pickup_services/delivery_services keys.
+        // Build it so accessorials reach + are stored on the quote — otherwise gw
+        // rejects a later booking with "BookingData and quoteInfo must be the same
+        // pickupServices."
+        const ps = params.pickup_services;
+        const ds = params.delivery_services;
+        if ((ps && ps.length) || (ds && ds.length)) {
+            body.accessorials = { pickup: ps ?? [], delivery: ds ?? [] };
+        }
         const headers = { "Content-Type": "application/json" };
         if (key)
             headers["Authorization"] = `Bearer ${key}`;
