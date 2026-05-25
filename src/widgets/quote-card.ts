@@ -1,43 +1,54 @@
-// Inline quote-card widget for Warp MCP tools.
+// Inline quote-card widget for Warp MCP tools — multi-carrier comparison.
 //
-// Renders a Warp-branded card showing rate, lane, transit, expiration, and a
-// "Book now" CTA that deep-links to the customer portal with all params
-// pre-filled so the portal auto-fires the quote. Used by the four quote tools
-// (warp_van_quote, warp_box_truck_quote, warp_ftl_quote, warp_ltl_quote).
+// Mirrors the customer-portal "Available options for this shipment" view: a
+// featured Warp "best option" card plus the marketplace carrier spread. For LTL
+// the spread comes from /api/v1/ltl/market-options (client.ts); other modes show
+// just the featured Warp option.
 //
-// Dual-platform — ONE render function (window.__warpRenderCard), two delivery paths:
-//   • ChatGPT (Apps SDK): reads window.openai.toolOutput.structuredContent
-//     synchronously (or the inlined <script id="__warp_data"> for embedded use).
-//     Resource: ui://warp/quote-card  (mimeType text/html)
-//   • Claude (MCP Apps / SEP-1865): the host renders the resource in a sandboxed
-//     iframe, then pushes the tool result over a JSON-RPC/postMessage bridge. The
-//     bundled App client (quote-card-client.ts) receives it and calls the same
-//     painter. Resource: ui://warp/quote-card.mcp  (mimeType text/html;profile=mcp-app)
-// Clients without UI support ignore both resources and fall back to the text JSON.
+// Dual-platform — ONE painter (window.__warpRenderCard), two delivery paths:
+//   • ChatGPT (Apps SDK): window.openai.toolOutput.structuredContent.
+//     Resource: ui://warp/quote-card  (text/html)
+//   • Claude (MCP Apps / SEP-1865): tool result over the postMessage bridge via
+//     the bundled App client. Resource: ui://warp/quote-card.mcp (text/html;profile=mcp-app)
+// Non-UI clients ignore both and fall back to the text JSON.
 import { APP_CLIENT_BUNDLE } from "./quote-card-client-bundle.js";
 
 export type QuoteMode = "van" | "box-truck" | "ftl" | "ltl";
 
-export interface QuoteWidgetData {
-  quote_id: string;
-  mode: QuoteMode;
+export interface MarketplaceOption {
+  carrier_name: string;
   rate_usd: number;
-  origin_zip: string;
-  destination_zip: string;
-  pallets: number;
-  pickup_date: string;
-  delivery_date: string;
+  per_pallet: number;
   transit_days: number;
-  expires_at: string;
-  vehicle_label: string;
-  payment_ready: boolean;
+  service_level?: string;
 }
 
-// ChatGPT Apps SDK resource (synchronous window.openai binding).
+export interface QuoteWidgetData {
+  type: "quote";
+  mode: QuoteMode;
+  origin_zip: string;
+  destination_zip: string;
+  pickup_date: string;
+  pallets: number;
+  expires_at: string;
+  booking_url: string;
+  warp: {
+    quote_id: string;
+    rate_usd: number;
+    per_pallet: number;
+    transit_days: number;
+    delivery_date: string;
+    vehicle_label: string;
+    on_time_pct: number;
+    payment_ready: boolean;
+  };
+  marketplace: MarketplaceOption[];
+  warp_count: number;
+  marketplace_count: number;
+}
+
 export const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
-// Claude / MCP Apps resource (postMessage bridge). MUST use the mcp-app mimeType.
 export const QUOTE_CARD_MCP_RESOURCE_URI = "ui://warp/quote-card.mcp";
-// Spec-mandated MIME for MCP Apps UI resources (RESOURCE_MIME_TYPE in ext-apps).
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 
 const MODE_LABELS: Record<QuoteMode, string> = {
@@ -47,343 +58,225 @@ const MODE_LABELS: Record<QuoteMode, string> = {
   ltl: "LTL",
 };
 
-const PORTAL_MODE_PARAM: Record<QuoteMode, string> = {
-  van: "cargo_van",
-  "box-truck": "box_truck_26",
-  ftl: "truck_53",
-  ltl: "shared_ltl",
-};
-
 export function toWidgetData(
   mode: QuoteMode,
-  input: {
-    origin_zip: string;
-    destination_zip: string;
-    pickup_date: string;
-    pallets?: number;
-  },
+  input: { origin_zip: string; destination_zip: string; pickup_date: string; pallets?: number },
   response: Record<string, unknown>,
 ): QuoteWidgetData | null {
   const quoteId = typeof response.quote_id === "string" ? response.quote_id : null;
   const rate = typeof response.price_usd === "number" ? response.price_usd : null;
   if (!quoteId || rate === null) return null;
 
+  const pallets = input.pallets ?? 1;
   const service = (response.service ?? {}) as Record<string, unknown>;
   const vehicle = typeof service.vehicle === "string" ? service.vehicle : MODE_LABELS[mode];
   const transit = typeof response.transit_days === "number" ? response.transit_days : 0;
   const delivery = typeof response.delivery_date === "string" ? response.delivery_date : input.pickup_date;
   const expires = typeof response.expires_at === "string" ? response.expires_at : new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
+  const rawMkt = Array.isArray(response.market_options) ? (response.market_options as Array<Record<string, unknown>>) : [];
+  const marketplaceAll: MarketplaceOption[] = rawMkt
+    .filter((o) => o && o.is_warp !== true && typeof o.price_usd === "number" && typeof o.carrier_name === "string")
+    .map((o) => ({
+      carrier_name: String(o.carrier_name),
+      rate_usd: o.price_usd as number,
+      per_pallet: (o.price_usd as number) / pallets,
+      transit_days: typeof o.transit_days === "number" ? o.transit_days : transit,
+      service_level: typeof o.service_level === "string" ? o.service_level : undefined,
+    }))
+    .sort((a, b) => a.rate_usd - b.rate_usd);
+  // Show the cheapest few inline; the rest live in the portal (32+ rows is too
+  // tall for a chat widget). The count pill still reflects the true total.
+  const MAX_SHOWN = 10;
+  const marketplace = marketplaceAll.slice(0, MAX_SHOWN);
+
   return {
-    quote_id: quoteId,
+    type: "quote",
     mode,
-    rate_usd: rate,
     origin_zip: input.origin_zip,
     destination_zip: input.destination_zip,
-    pallets: input.pallets ?? 1,
     pickup_date: input.pickup_date,
-    delivery_date: delivery,
-    transit_days: transit,
+    pallets,
     expires_at: expires,
-    vehicle_label: vehicle,
-    payment_ready: response.payment_ready === true,
+    booking_url: typeof response.booking_url === "string" ? response.booking_url : "",
+    warp: {
+      quote_id: quoteId,
+      rate_usd: rate,
+      per_pallet: rate / pallets,
+      transit_days: transit,
+      delivery_date: delivery,
+      vehicle_label: vehicle,
+      on_time_pct: 98.2,
+      payment_ready: response.payment_ready === true,
+    },
+    marketplace,
+    warp_count: 1,
+    marketplace_count: marketplaceAll.length,
   };
 }
 
 const CARD_CSS = `
 :root {
-  --warp-bg: #141C2B;
-  --warp-surface: #1A2332;
-  --warp-border: rgba(255,255,255,0.08);
-  --warp-text: #E8EEF7;
-  --warp-text-dim: #8895AB;
-  --warp-accent: #4ADE80;
-  --warp-accent-dim: rgba(74,222,128,0.12);
-  --warp-radius: 12px;
+  --bg: #0B0E13;
+  --surface: #11161E;
+  --surface-2: #141A23;
+  --line: rgba(255,255,255,0.07);
+  --text: #EEF2F7;
+  --muted: #93A0B2;
+  --dim: #6B7787;
+  --accent: #3EE07F;
+  --accent-soft: rgba(62,224,127,0.12);
+  --accent-line: rgba(62,224,127,0.35);
 }
 * { box-sizing: border-box; }
 html, body {
-  margin: 0;
-  padding: 0;
-  /* Fill the host iframe with the card surface so there's no white gap when the
-     iframe is wider than the content (Claude renders MCP App iframes on white). */
-  background: var(--warp-surface);
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
   font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--warp-text);
-}
-.warp-card {
-  /* The iframe body IS the card surface; content is capped + centered so it fills
-     edge-to-edge on any width with no seam, no border, no floating-on-white. */
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 22px 26px;
-  max-width: 640px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.warp-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.warp-mode-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--warp-accent-dim);
-  color: var(--warp-accent);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-}
-.warp-mode-badge::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--warp-accent);
-}
-.warp-brand {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--warp-text-dim);
-  font-weight: 600;
-}
-.warp-rate {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.warp-rate-value {
-  font-size: 40px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--warp-text);
-  line-height: 1;
-}
-.warp-rate-suffix {
   font-size: 14px;
-  color: var(--warp-text-dim);
-  font-weight: 500;
+  line-height: 1.4;
 }
-.warp-lane {
-  font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 14px;
-  color: var(--warp-text-dim);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.warp-lane-arrow {
-  color: var(--warp-accent);
-  font-weight: 600;
-}
-.warp-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid var(--warp-border);
-  border-bottom: 1px solid var(--warp-border);
-}
-.warp-stat-label {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--warp-text-dim);
-  margin-bottom: 4px;
-}
-.warp-stat-value {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--warp-text);
-}
-.warp-expires {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--warp-text-dim);
-}
-.warp-expires-countdown {
-  font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--warp-text);
-  font-weight: 500;
-}
-.warp-expires-countdown[data-expired="true"] {
-  color: #FCA5A5;
-}
-.warp-book {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 14px 20px;
-  background: var(--warp-accent);
-  color: #0A0F1A;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  text-decoration: none;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  transition: transform 0.06s ease, opacity 0.12s ease;
-}
-.warp-book:hover { opacity: 0.9; }
-.warp-book:active { transform: scale(0.99); }
-.warp-book-arrow {
-  font-weight: 700;
-}
-.warp-footer {
-  font-size: 11px;
-  color: var(--warp-text-dim);
-  text-align: center;
-  margin-top: -4px;
-}
-.warp-footer a {
-  color: var(--warp-text-dim);
-  text-decoration: underline;
-  text-decoration-color: var(--warp-border);
-}`;
+.warp-root { max-width: 860px; margin: 0 auto; padding: 20px 22px; }
+.mono { font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace; }
+.wh-sep { color: var(--dim); margin: 0 2px; }
 
-const CARD_BODY = `<div class="warp-card" id="__warp_card" role="region" aria-label="Warp freight quote">
-  <div class="warp-header">
-    <span class="warp-mode-badge" id="__warp_mode">Quote</span>
-    <span class="warp-brand">Warp</span>
-  </div>
+/* lane header */
+.wh-lane { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+.wh-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--accent); display: inline-block; }
+.wh-arrow { color: var(--dim); }
+.wh-lane .z { color: var(--text); font-weight: 600; }
 
-  <div>
-    <div class="warp-rate">
-      <span class="warp-rate-value" id="__warp_rate">--</span>
-      <span class="warp-rate-suffix">all-in</span>
-    </div>
-    <div class="warp-lane">
-      <span id="__warp_origin">-----</span>
-      <span class="warp-lane-arrow">&#8594;</span>
-      <span id="__warp_dest">-----</span>
-    </div>
-  </div>
+/* title + counts */
+.wh-title { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.wh-pill { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.01em; }
+.wh-pill-warp { background: var(--accent-soft); color: var(--accent); }
+.wh-pill-mkt { background: rgba(255,255,255,0.06); color: var(--muted); }
+.wh-subtitle { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
 
-  <div class="warp-grid">
-    <div>
-      <div class="warp-stat-label">Equipment</div>
-      <div class="warp-stat-value" id="__warp_vehicle">--</div>
-    </div>
-    <div>
-      <div class="warp-stat-label">Pickup</div>
-      <div class="warp-stat-value" id="__warp_pickup">--</div>
-    </div>
-    <div>
-      <div class="warp-stat-label">Delivery</div>
-      <div class="warp-stat-value" id="__warp_delivery">--</div>
-    </div>
-  </div>
+/* featured warp card */
+.wf-card { position: relative; background: var(--surface); border: 1px solid var(--accent-line); border-radius: 16px; padding: 22px 24px; overflow: hidden; }
+.wf-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
+.wf-top { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.wf-best { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.wf-rec { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent-line); background: var(--accent-soft); padding: 2px 9px; border-radius: 999px; }
+.wf-body { display: flex; justify-content: space-between; align-items: flex-start; gap: 28px; flex-wrap: wrap; }
+.wf-left { display: flex; gap: 16px; align-items: flex-start; flex: 1 1 320px; min-width: 280px; }
+.wf-truck { flex: 0 0 auto; margin-top: 2px; }
+.wf-name { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.wf-warp { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+.wf-desc { color: var(--muted); font-size: 13px; margin-top: 6px; max-width: 420px; }
+.wf-tagline { color: var(--dim); font-style: italic; font-size: 12.5px; margin-top: 6px; }
+.wf-meta { color: var(--muted); font-size: 13px; margin-top: 12px; }
+.wf-right { flex: 0 0 auto; min-width: 232px; display: flex; flex-direction: column; align-items: stretch; text-align: right; }
+.wf-pp-label { color: var(--dim); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.wf-pp { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; margin-top: 2px; }
+.wf-pp .u { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.wf-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.wf-total .l { color: var(--muted); }
+.wf-total .v { font-weight: 700; font-size: 16px; }
+.wf-otp { color: var(--accent); font-size: 12.5px; font-weight: 500; margin-top: 8px; text-align: left; }
+.wf-cta { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; padding: 14px 20px; background: var(--accent); color: #07140C; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 11px; letter-spacing: 0.01em; transition: opacity 0.12s ease; }
+.wf-cta:hover { opacity: 0.92; }
+.wf-note { color: var(--dim); font-size: 11.5px; text-align: center; margin-top: 10px; }
 
-  <div class="warp-expires">
-    <span>Quote expires in</span>
-    <span class="warp-expires-countdown" id="__warp_countdown">--:--</span>
-  </div>
+/* marketplace list */
+.wm-head { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 22px 0 10px; }
+.wm-list { display: flex; flex-direction: column; gap: 8px; }
+.wm-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: inherit; transition: background 0.12s ease, border-color 0.12s ease; }
+.wm-row:hover { background: var(--surface-2); border-color: rgba(255,255,255,0.14); }
+.wm-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wm-tag { font-size: 10px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 5px; letter-spacing: 0.03em; }
+.wm-sub { color: var(--dim); font-size: 12.5px; margin-top: 5px; }
+.wm-price { display: flex; align-items: center; gap: 16px; white-space: nowrap; }
+.wm-price .p { font-size: 17px; font-weight: 700; }
+.wm-select { color: var(--muted); font-size: 13px; }
+.wm-row:hover .wm-select { color: var(--accent); }
+.wm-foot { color: var(--dim); font-size: 11.5px; margin-top: 12px; text-align: center; }`;
 
-  <a class="warp-book" id="__warp_book" href="#" rel="noopener">
-    Book this rate <span class="warp-book-arrow">&#8594;</span>
-  </a>
+const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 
-  <div class="warp-footer" id="__warp_footer">
-    Booking opens at <a href="https://customer.wearewarp.com" target="_blank" rel="noopener">customer.wearewarp.com</a>. Card required at checkout.
-  </div>
-</div>`;
-
-// Shared painter, defined as window.__warpRenderCard(data). Both the ChatGPT
-// reader and the Claude App client call this with the QuoteWidgetData, so the
-// render logic lives in exactly one place.
+// Shared painter. Receives QuoteWidgetData and builds the comparison DOM. One
+// definition; both the ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
 window.__warpRenderCard = function(data) {
-  if (!data) return;
+  var root = document.getElementById("__warp_root");
+  if (!root || !data || !data.warp) return;
+  var TRUCK = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#3EE07F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5h12v9h-12z"/><path d="M13.5 8h3.8l3.2 3.1v2.4h-7z"/><circle cx="6" cy="16.5" r="1.7"/><circle cx="17" cy="16.5" r="1.7"/></svg>';
   var MODE_LABEL = { van: "Cargo Van", "box-truck": "Box Truck", ftl: "Full Truckload", ltl: "LTL" };
   var PORTAL_MODE = { van: "cargo_van", "box-truck": "box_truck_26", ftl: "truck_53", ltl: "shared_ltl" };
-  function fmtMoney(n) {
-    return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  }
-  function fmtDate(s) {
-    if (!s) return "--";
-    try {
-      var d = new Date(s + "T12:00:00Z");
-      return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
-    } catch (e) { return s; }
-  }
-  function set(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; }
-  set("__warp_mode", MODE_LABEL[data.mode] || "Quote");
-  set("__warp_rate", fmtMoney(data.rate_usd));
-  set("__warp_origin", data.origin_zip);
-  set("__warp_dest", data.destination_zip);
-  set("__warp_vehicle", data.vehicle_label || MODE_LABEL[data.mode] || "--");
-  set("__warp_pickup", fmtDate(data.pickup_date));
-  set("__warp_delivery", fmtDate(data.delivery_date));
+  var modeLabel = MODE_LABEL[data.mode] || "LTL";
+  var w = data.warp;
+  var mkt = Array.isArray(data.marketplace) ? data.marketplace : [];
+  var mktTotal = data.marketplace_count || mkt.length;
+  var pallets = data.pallets || 1;
 
-  // Footer adapts to whether a card is already on file. Authed quotes carry
-  // payment_ready:true; keyless/anon quotes omit it, so they keep the default
-  // "card required at checkout" guidance.
-  var footerEl = document.getElementById("__warp_footer");
-  if (footerEl && data.payment_ready) {
-    footerEl.innerHTML = 'Card on file, ready to book at <a href="https://customer.wearewarp.com" target="_blank" rel="noopener">customer.wearewarp.com</a>.';
-  }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c];}); }
+  function money(n){ return "$" + Math.round(Number(n)||0).toLocaleString("en-US"); }
+  function fmtDate(s){ if(!s) return "--"; try{ var d=new Date(s+"T12:00:00Z"); return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"});}catch(e){return s;} }
+  function days(n){ n=Number(n)||0; return n + (n===1?" day":" days"); }
 
-  // Build the deep-link per the canonical schema (auto-fires the portal quote).
+  // Deep-link to the portal (auto-fires the lane), used by the Warp CTA + rows.
   var params = new URLSearchParams();
-  params.set("originZip", data.origin_zip);
-  params.set("destinationZip", data.destination_zip);
-  params.set("pd", data.pickup_date);
-  params.set("pc", String(data.pallets || 1));
+  params.set("originZip", data.origin_zip); params.set("destinationZip", data.destination_zip);
+  params.set("pd", data.pickup_date); params.set("pc", String(pallets));
   params.set("mp", PORTAL_MODE[data.mode] || "shared_ltl");
-  params.set("utm_source", "mcp");
-  params.set("utm_medium", "inline-widget");
-  params.set("utm_campaign", "quote-card");
-  if (data.quote_id) params.set("warp_quote_id", data.quote_id);
-  var bookHref = "https://customer.wearewarp.com/public/freight-quote?" + params.toString();
-  var bookEl = document.getElementById("__warp_book");
-  if (bookEl) {
-    bookEl.setAttribute("href", bookHref);
-    bookEl.setAttribute("target", "_blank");
+  params.set("utm_source","mcp"); params.set("utm_medium","inline-widget"); params.set("utm_campaign","quote-card");
+  if (w.quote_id) params.set("warp_quote_id", w.quote_id);
+  var bookHref = (data.booking_url && data.booking_url.indexOf("warp_quote_id") > -1)
+    ? data.booking_url
+    : "https://customer.wearewarp.com/public/freight-quote?" + params.toString();
+
+  var isLtl = data.mode === "ltl";
+  var bigVal = isLtl ? w.per_pallet : w.rate_usd;
+  var bigLabel = isLtl ? "PER PALLET" : "ALL-IN";
+
+  var h = "";
+  // lane header
+  h += '<div class="wh-lane"><span class="wh-dot"></span><span class="z mono">' + esc(data.origin_zip) + '</span> <span class="wh-arrow">&#8594;</span> <span class="z mono">' + esc(data.destination_zip) + '</span><span class="wh-sep">&#183;</span>' + fmtDate(data.pickup_date) + '<span class="wh-sep">&#183;</span>' + pallets + (pallets===1?" pallet":" pallets") + '</div>';
+  // title + counts
+  h += '<div class="wh-title">Available options for this shipment';
+  h += ' <span class="wh-pill wh-pill-warp">&#8226; ' + (data.warp_count||1) + ' Warp</span>';
+  if (mktTotal) h += '<span class="wh-pill wh-pill-mkt">' + mktTotal + ' Marketplace</span>';
+  h += '</div>';
+  h += '<div class="wh-subtitle">' + (mkt.length ? "All rates loaded. Select an option to continue." : "Warp-direct rate for this lane.") + '</div>';
+
+  // featured Warp card
+  h += '<div class="wf-card">';
+  h += '<div class="wf-top"><span class="wf-best">&#8226; Best option for this shipment</span><span class="wf-rec">Recommended</span></div>';
+  h += '<div class="wf-body">';
+  h += '<div class="wf-left"><div class="wf-truck">' + TRUCK + '</div><div>';
+  h += '<div class="wf-name">Warp ' + esc(modeLabel) + ' <span class="wf-warp">WARP</span></div>';
+  h += '<div class="wf-desc">Warp-direct pricing, live tracking included &#183; multi-stop network</div>';
+  h += '<div class="wf-tagline">Fewer terminal touches for smoother routing</div>';
+  h += '<div class="wf-meta">&#128197; Pickup: ' + fmtDate(data.pickup_date) + '<span class="wh-sep">&#183;</span>&#128336; Transit: ' + days(w.transit_days) + '</div>';
+  h += '</div></div>';
+  h += '<div class="wf-right">';
+  h += '<div class="wf-pp-label">' + bigLabel + '</div>';
+  h += '<div class="wf-pp">' + money(bigVal) + (isLtl ? '' : '<span class="u">all-in</span>') + '</div>';
+  if (isLtl) h += '<div class="wf-total"><span class="l">Total</span><span class="v">' + money(w.rate_usd) + '</span></div>';
+  h += '<div class="wf-otp">Warp ' + esc(modeLabel) + ' &#183; ' + (w.on_time_pct||98.2) + '% on-time delivery</div>';
+  h += '<a class="wf-cta" href="' + esc(bookHref) + '" target="_blank" rel="noopener">Continue with Warp ' + esc(modeLabel) + ' &#8594;</a>';
+  h += '<div class="wf-note">' + (w.payment_ready ? "Card on file. " : "") + 'No commitment until confirmed.</div>';
+  h += '</div></div></div>';
+
+  // marketplace spread
+  if (mkt.length) {
+    h += '<div class="wm-head">Other ' + esc(modeLabel) + ' carriers</div><div class="wm-list">';
+    mkt.forEach(function(o){
+      h += '<a class="wm-row" href="' + esc(bookHref) + '" target="_blank" rel="noopener">';
+      h += '<div><div class="wm-name">' + esc(o.carrier_name) + ' <span class="wm-tag">' + esc(modeLabel) + '</span></div>';
+      h += '<div class="wm-sub">Transit: ' + days(o.transit_days) + '<span class="wh-sep">&#183;</span>Pickup: ' + esc(data.pickup_date) + '</div></div>';
+      h += '<div class="wm-price"><span class="p">' + money(o.rate_usd) + '</span><span class="wm-select">Select</span></div>';
+      h += '</a>';
+    });
+    var more = mktTotal - mkt.length;
+    h += '</div><div class="wm-foot">' + (more > 0 ? ("+" + more + " more carriers &#183; ") : "") + 'Marketplace rates are indicative; booking opens Warp at customer.wearewarp.com.</div>';
   }
 
-  // Expiration countdown — ticks every second until 00:00, then locks the CTA.
-  // Re-render safe: clear any prior timer so repeated tool-results don't stack.
-  if (window.__warpCountdownTimer) { clearInterval(window.__warpCountdownTimer); }
-  var expiresAt = data.expires_at ? new Date(data.expires_at).getTime() : (Date.now() + 15 * 60 * 1000);
-  var countdownEl = document.getElementById("__warp_countdown");
-  function tick() {
-    var remaining = Math.max(0, expiresAt - Date.now());
-    var totalSec = Math.floor(remaining / 1000);
-    var min = Math.floor(totalSec / 60);
-    var sec = totalSec % 60;
-    if (countdownEl) countdownEl.textContent = String(min).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
-    if (remaining === 0) {
-      if (countdownEl) countdownEl.setAttribute("data-expired", "true");
-      if (bookEl) {
-        bookEl.style.opacity = "0.5";
-        bookEl.style.pointerEvents = "none";
-        bookEl.textContent = "Quote expired \\u2014 request a new quote";
-      }
-      clearInterval(window.__warpCountdownTimer);
-    }
-  }
-  tick();
-  window.__warpCountdownTimer = setInterval(tick, 1000);
+  root.innerHTML = h;
 };`;
 
-// ChatGPT reader: bind synchronously from window.openai.toolOutput, or from the
-// inlined data script for embedded use. Unchanged behavior from the original.
 const OPENAI_CLIENT_JS = `
 (function() {
   function readData() {
@@ -409,7 +302,7 @@ function buildHtml(opts: { clientScript: string; dataScript?: string }): string 
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Warp Quote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" />
 <style>${CARD_CSS}</style>
 </head>
 <body>
@@ -443,8 +336,7 @@ export function quoteCardMcpTemplate(): string {
 }
 
 // JSON-LD safety: any "</script>" or "<script" inside the JSON payload would
-// terminate the surrounding <script> tag and break parsing. Cortex hard rule
-// 2026-05-19: always escape these when embedding JSON inside a <script> block.
+// terminate the surrounding <script> tag. Escape before embedding JSON in a tag.
 function escapeJsonForScript(s: string): string {
   return s.replace(/<\/script/gi, "<\\/script").replace(/<script/gi, "<\\script");
 }

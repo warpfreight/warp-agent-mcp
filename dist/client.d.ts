@@ -32,6 +32,7 @@ export declare class WarpClient {
      */
     private get selfServeOrigin();
     private _selfServeQuote;
+    private _ltlMarketOptions;
     vanQuote(params: Record<string, unknown>): Promise<unknown>;
     boxTruckQuote(params: Record<string, unknown>): Promise<unknown>;
     ftlQuote(params: Record<string, unknown>): Promise<unknown>;

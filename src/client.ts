@@ -175,12 +175,21 @@ export class WarpClient {
     const originZip = String(params.origin_zip ?? "");
     const destZip = String(params.destination_zip ?? "");
 
+    // For LTL, also pull the multi-carrier spread (~20 carriers, ~15s) so the
+    // quote card can render the full comparison. Non-fatal: on failure/timeout
+    // the card falls back to the single Warp option. Other modes stay single-rate.
+    let marketOptions: unknown[] = [];
+    if (mode === "ltl" && hasQuote) {
+      try { marketOptions = await this._ltlMarketOptions(body, key); } catch { /* non-fatal */ }
+    }
+
     return {
       // Standard MCP quote fields (tools.ts reads these for quoteAmountCache)
       warp_quote_id: quoteId,
       warp_price: priceUsd,
       warp_transit_days: transitDays,
       options: [],
+      market_options: marketOptions,
       // Pass self-serve response fields through for warp_book and display
       ...(hasQuote ? {
         quote_id: quoteId,
@@ -201,6 +210,24 @@ export class WarpClient {
         ? `Warp ${mode.toUpperCase()} quote_id: ${quoteId} — use this id with warp_book to book`
         : `No Warp coverage on this lane (${originZip} → ${destZip}). ${data.error ?? ""}`,
     };
+  }
+
+  // Multi-carrier LTL spread for the comparison card. Keyless-capable (server
+  // falls back to the house quote account). Slow (~15s) — it polls every carrier.
+  private async _ltlMarketOptions(
+    body: Record<string, unknown>,
+    key: string | undefined,
+  ): Promise<unknown[]> {
+    const url = `${this.selfServeOrigin}/api/v1/ltl/market-options`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+    const res = await fetch(url, {
+      method: "POST", headers, body: JSON.stringify(body),
+      signal: AbortSignal.timeout(22000),
+    });
+    if (!res.ok) return [];
+    const j = await res.json() as Record<string, unknown>;
+    return Array.isArray(j.market_options) ? j.market_options : [];
   }
 
   async vanQuote(params: Record<string, unknown>) {
