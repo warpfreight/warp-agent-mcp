@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WarpClient } from "./client.js";
 import { registerTools } from "./tools.js";
-import { QUOTE_CARD_RESOURCE_URI, quoteCardTemplate } from "./widgets/quote-card.js";
+import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, MCP_APP_MIME_TYPE, quoteCardTemplate, quoteCardMcpTemplate, } from "./widgets/quote-card.js";
 // Node 20+ is required for native fetch and the MCP SDK. npx -y ignores the
 // "engines" field, so a user on an older Node crashes with a cryptic
 // "fetch is not defined". This guard converts that into an actionable message.
@@ -101,15 +101,24 @@ const server = new McpServer({
 // This means CLI login/signup takes effect immediately without MCP restart.
 const client = new WarpClient(WARP_API_URL, loadApiKey);
 registerTools(server, client, loadApiKey);
-// Inline widget resources. ChatGPT's Apps SDK fetches these once via
-// resources/read and re-renders per tool call with structuredContent; Claude
-// inlines rendered HTML per tool response, so these are a no-op for Claude but
-// harmless. Clients without UI support ignore them entirely.
+// Inline quote-card UI resources, one per host UI protocol. ChatGPT's Apps SDK
+// fetches the text/html resource and binds structuredContent via window.openai.
+// Claude (MCP Apps / SEP-1865) fetches the text/html;profile=mcp-app resource and
+// delivers the result over the postMessage bridge. Clients without UI ignore both.
 server.registerResource("warp-quote-card", QUOTE_CARD_RESOURCE_URI, {
     description: "Inline quote card shown after warp_van_quote / warp_box_truck_quote / warp_ftl_quote / warp_ltl_quote. Renders rate, lane, transit, expiration countdown, and a Book CTA.",
     mimeType: "text/html",
 }, async () => ({
     contents: [{ uri: QUOTE_CARD_RESOURCE_URI, mimeType: "text/html", text: quoteCardTemplate() }],
+}));
+// Claude / MCP Apps variant. Same card, but the inlined client speaks the MCP
+// Apps postMessage bridge and the mimeType carries the mcp-app profile so Claude
+// renders it as an interactive widget.
+server.registerResource("warp-quote-card-mcp", QUOTE_CARD_MCP_RESOURCE_URI, {
+    description: "Inline quote card (MCP Apps) shown after warp_van_quote / warp_box_truck_quote / warp_ftl_quote / warp_ltl_quote. Renders rate, lane, transit, expiration, and a Book CTA.",
+    mimeType: MCP_APP_MIME_TYPE,
+}, async () => ({
+    contents: [{ uri: QUOTE_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: quoteCardMcpTemplate() }],
 }));
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -6,10 +6,19 @@ import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, isCanadianPostal, CANADA_POLICY, coverageGapRefusal } from "./policy.js";
 import {
   QUOTE_CARD_RESOURCE_URI,
+  QUOTE_CARD_MCP_RESOURCE_URI,
   type QuoteMode,
   renderQuoteCard,
   toWidgetData,
 } from "./widgets/quote-card.js";
+
+// Claude / MCP Apps (SEP-1865) UI linkage. Goes on each quote tool DEFINITION
+// (so the host knows to render the card) and on the result. ChatGPT ignores
+// these and uses the openai/* keys instead; the two namespaces don't collide.
+const UI_META: Record<string, unknown> = {
+  ui: { resourceUri: QUOTE_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
+  "ui/resourceUri": QUOTE_CARD_MCP_RESOURCE_URI,
+};
 
 type QuoteInput = { origin_zip: string; destination_zip: string; pickup_date: string; pallets?: number };
 
@@ -26,7 +35,7 @@ function quoteToolResult(mode: QuoteMode, input: QuoteInput, data: Record<string
   const result: CallToolResult = { content };
   if (widget) {
     result.structuredContent = widget as unknown as Record<string, unknown>;
-    result._meta = { "openai/outputTemplate": QUOTE_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true };
+    result._meta = { "openai/outputTemplate": QUOTE_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...UI_META };
   }
   return result;
 }
@@ -69,7 +78,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   const WARP_API_KEY = getApiKey;
   // ── 1. warp_van_quote ───────────────────────────────────────────
 
-  server.tool(
+  const vanQuoteTool = server.tool(
     "warp_van_quote",
     "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)",
     {
@@ -123,7 +132,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── 2. warp_box_truck_quote ─────────────────────────────────────
 
-  server.tool(
+  const boxTruckQuoteTool = server.tool(
     "warp_box_truck_quote",
     "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)",
     {
@@ -176,7 +185,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── 3. warp_ftl_quote ───────────────────────────────────────────
 
-  server.tool(
+  const ftlQuoteTool = server.tool(
     "warp_ftl_quote",
     "Quote a full truckload (53' dry van). Only origin, destination, and date required.",
     {
@@ -228,7 +237,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── 4. warp_ltl_quote ───────────────────────────────────────────
 
-  server.tool(
+  const ltlQuoteTool = server.tool(
     "warp_ltl_quote",
     "Quote an LTL shipment. Provide dims + commodity for a firm quote; omit for indicative pricing (FAK rates if no freight class). Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
     {
@@ -298,6 +307,14 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       }
     },
   );
+
+  // Advertise the Claude / MCP Apps UI resource on each quote tool definition so
+  // the host renders the inline quote card. ChatGPT uses the result _meta instead.
+  // Optional-chained: registerTools also runs with a stub server in tests whose
+  // tool() returns no handle — there the update is simply a no-op.
+  for (const t of [vanQuoteTool, boxTruckQuoteTool, ftlQuoteTool, ltlQuoteTool]) {
+    t?.update({ _meta: UI_META });
+  }
 
   // ── 5. warp_book ────────────────────────────────────────────────
 

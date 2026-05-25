@@ -1,6 +1,6 @@
 {
   "name": "warp-agent-mcp",
-  "version": "0.6.6",
+  "version": "0.7.1",
   "description": "MCP server for the Warp freight API. 16 tools covering the full booking lifecycle: quote (van/box-truck/FTL/LTL), book, track, events, invoices, documents, lane history, quote history, payment status, in-chat login, status, analytics. Renders inline quote cards in Claude and ChatGPT. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
   "keywords": [
     "warp",
@@ -31,7 +31,7 @@
     "server.json"
   ],
   "scripts": {
-    "build": "tsc && node scripts/add-shebang.mjs",
+    "build": "node scripts/build-widget.mjs && tsc && node scripts/add-shebang.mjs",
     "dev": "tsc --watch",
     "postinstall": "node scripts/postinstall.mjs",
     "test": "node test/refund.mjs && node test/e2e.mjs"
@@ -41,6 +41,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.2",
     "@types/node": "^25.6.0",
     "esbuild": "^0.28.0",
     "typescript": "^5.8.3"

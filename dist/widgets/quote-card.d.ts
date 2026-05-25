@@ -14,6 +14,8 @@ export interface QuoteWidgetData {
     payment_ready: boolean;
 }
 export declare const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
+export declare const QUOTE_CARD_MCP_RESOURCE_URI = "ui://warp/quote-card.mcp";
+export declare const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 export declare function toWidgetData(mode: QuoteMode, input: {
     origin_zip: string;
     destination_zip: string;
@@ -22,3 +24,4 @@ export declare function toWidgetData(mode: QuoteMode, input: {
 }, response: Record<string, unknown>): QuoteWidgetData | null;
 export declare function renderQuoteCard(data: QuoteWidgetData): string;
 export declare function quoteCardTemplate(): string;
+export declare function quoteCardMcpTemplate(): string;
