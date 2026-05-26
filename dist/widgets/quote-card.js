@@ -41,6 +41,9 @@ export function toWidgetData(mode, input, response) {
         per_pallet: o.price_usd / pallets,
         transit_days: typeof o.transit_days === "number" ? o.transit_days : transit,
         service_level: typeof o.service_level === "string" ? o.service_level : undefined,
+        // Per-carrier bookable id (warp-site per-carrier booking) — lets warp_book this carrier.
+        quote_id: typeof o.quote_id === "string" ? o.quote_id : undefined,
+        bookable: o.bookable === true,
     }))
         .sort((a, b) => a.rate_usd - b.rate_usd);
     // Show the cheapest few inline; the rest live in the portal (32+ rows is too
@@ -225,7 +228,11 @@ window.__warpRenderCard = function(data) {
       h += '</a>';
     });
     var more = mktTotal - mkt.length;
-    h += '</div><div class="wm-foot">' + (more > 0 ? ("+" + more + " more carriers &#183; ") : "") + 'Marketplace rates are indicative; booking opens Warp at customer.wearewarp.com.</div>';
+    var anyBookable = mkt.some(function(o){ return o && o.bookable; });
+    var footMsg = anyBookable
+      ? "Ask me to book any of these carriers directly."
+      : "Marketplace rates are indicative; booking opens Warp at customer.wearewarp.com.";
+    h += '</div><div class="wm-foot">' + (more > 0 ? ("+" + more + " more carriers &#183; ") : "") + footMsg + '</div>';
   }
 
   root.innerHTML = h;

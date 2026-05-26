@@ -5,6 +5,8 @@ export interface MarketplaceOption {
     per_pallet: number;
     transit_days: number;
     service_level?: string;
+    quote_id?: string;
+    bookable?: boolean;
 }
 export interface QuoteWidgetData {
     type: "quote";
