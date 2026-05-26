@@ -191,7 +191,6 @@ html, body {
 .wm-head { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 22px 0 10px; }
 .wm-list { display: flex; flex-direction: column; gap: 8px; }
 .wm-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: inherit; transition: background 0.12s ease, border-color 0.12s ease; }
-.wm-row:hover { background: var(--surface-2); border-color: rgba(255,255,255,0.14); }
 .wm-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wm-tag { font-size: 10px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 5px; letter-spacing: 0.03em; }
 .wm-sub { color: var(--dim); font-size: 12.5px; margin-top: 5px; }
@@ -211,7 +210,6 @@ window.__warpRenderCard = function(data) {
   if (!root || !data || !data.warp) return;
   var TRUCK = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#3EE07F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5h12v9h-12z"/><path d="M13.5 8h3.8l3.2 3.1v2.4h-7z"/><circle cx="6" cy="16.5" r="1.7"/><circle cx="17" cy="16.5" r="1.7"/></svg>';
   var MODE_LABEL = { van: "Cargo Van", "box-truck": "Box Truck", ftl: "Full Truckload", ltl: "LTL" };
-  var PORTAL_MODE = { van: "cargo_van", "box-truck": "box_truck_26", ftl: "truck_53", ltl: "shared_ltl" };
   var modeLabel = MODE_LABEL[data.mode] || "LTL";
   var w = data.warp;
   var mkt = Array.isArray(data.marketplace) ? data.marketplace : [];
@@ -223,17 +221,9 @@ window.__warpRenderCard = function(data) {
   function fmtDate(s){ if(!s) return "--"; try{ var d=new Date(s+"T12:00:00Z"); return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"});}catch(e){return s;} }
   function days(n){ n=Number(n)||0; return n + (n===1?" day":" days"); }
 
-  // Deep-link to the portal (auto-fires the lane), used by the Warp CTA + rows.
-  var params = new URLSearchParams();
-  params.set("originZip", data.origin_zip); params.set("destinationZip", data.destination_zip);
-  params.set("pd", data.pickup_date); params.set("pc", String(pallets));
-  params.set("mp", PORTAL_MODE[data.mode] || "shared_ltl");
-  params.set("utm_source","mcp"); params.set("utm_medium","inline-widget"); params.set("utm_campaign","quote-card");
-  if (w.quote_id) params.set("warp_quote_id", w.quote_id);
-  var bookHref = (data.booking_url && data.booking_url.indexOf("warp_quote_id") > -1)
-    ? data.booking_url
-    : "https://customer.wearewarp.com/public/freight-quote?" + params.toString();
-
+  // No clickable book buttons in the agent widget — booking is conversational
+  // (the user asks the assistant to book, which calls warp_book). The card is
+  // purely informational: it shows the options + their bookable ids in the data.
   var isLtl = data.mode === "ltl";
   var bigVal = isLtl ? w.per_pallet : w.rate_usd;
   var bigLabel = isLtl ? "PER PALLET" : "ALL-IN";
@@ -246,7 +236,7 @@ window.__warpRenderCard = function(data) {
   h += ' <span class="wh-pill wh-pill-warp">&#8226; ' + (data.warp_count||1) + ' Warp</span>';
   if (mktTotal) h += '<span class="wh-pill wh-pill-mkt">' + mktTotal + ' Marketplace</span>';
   h += '</div>';
-  h += '<div class="wh-subtitle">' + (mkt.length ? "All rates loaded. Select an option to continue." : "Warp-direct rate for this lane.") + '</div>';
+  h += '<div class="wh-subtitle">' + (mkt.length ? "All rates loaded." : "Warp-direct rate for this lane.") + '</div>';
 
   // featured Warp card
   h += '<div class="wf-card">';
@@ -263,19 +253,18 @@ window.__warpRenderCard = function(data) {
   h += '<div class="wf-pp">' + money(bigVal) + (isLtl ? '' : '<span class="u">all-in</span>') + '</div>';
   if (isLtl) h += '<div class="wf-total"><span class="l">Total</span><span class="v">' + money(w.rate_usd) + '</span></div>';
   h += '<div class="wf-otp">Warp ' + esc(modeLabel) + ' &#183; ' + (w.on_time_pct||98.2) + '% on-time delivery</div>';
-  h += '<a class="wf-cta" href="' + esc(bookHref) + '" target="_blank" rel="noopener">Continue with Warp ' + esc(modeLabel) + ' &#8594;</a>';
-  h += '<div class="wf-note">' + (w.payment_ready ? "Card on file. " : "") + 'No commitment until confirmed.</div>';
+  h += '<div class="wf-note">' + (w.payment_ready ? "Card on file." : "Card required to book.") + '</div>';
   h += '</div></div></div>';
 
   // marketplace spread
   if (mkt.length) {
     h += '<div class="wm-head">Other ' + esc(modeLabel) + ' carriers</div><div class="wm-list">';
     mkt.forEach(function(o){
-      h += '<a class="wm-row" href="' + esc(bookHref) + '" target="_blank" rel="noopener">';
+      h += '<div class="wm-row">';
       h += '<div><div class="wm-name">' + esc(o.carrier_name) + ' <span class="wm-tag">' + esc(modeLabel) + '</span></div>';
       h += '<div class="wm-sub">Transit: ' + days(o.transit_days) + '<span class="wh-sep">&#183;</span>Pickup: ' + esc(data.pickup_date) + '</div></div>';
-      h += '<div class="wm-price"><span class="p">' + money(o.rate_usd) + '</span><span class="wm-select">Select</span></div>';
-      h += '</a>';
+      h += '<div class="wm-price"><span class="p">' + money(o.rate_usd) + '</span></div>';
+      h += '</div>';
     });
     var more = mktTotal - mkt.length;
     var anyBookable = mkt.some(function(o){ return o && o.bookable; });
