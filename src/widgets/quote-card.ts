@@ -94,7 +94,7 @@ export function toWidgetData(
     .sort((a, b) => a.rate_usd - b.rate_usd);
   // Show the cheapest few inline; the rest live in the portal (32+ rows is too
   // tall for a chat widget). The count pill still reflects the true total.
-  const MAX_SHOWN = 10;
+  const MAX_SHOWN = 6;
   const marketplace = marketplaceAll.slice(0, MAX_SHOWN);
 
   return {
@@ -144,7 +144,7 @@ html, body {
   font-size: 14px;
   line-height: 1.4;
 }
-.warp-root { max-width: 860px; margin: 0 auto; padding: 20px 22px; }
+.warp-root { max-width: 860px; margin: 0 auto; padding: 12px 16px; }
 .mono { font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace; }
 .wh-sep { color: var(--dim); margin: 0 2px; }
 
@@ -162,38 +162,38 @@ html, body {
 .wh-subtitle { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
 
 /* featured warp card */
-.wf-card { position: relative; background: var(--surface); border: 1px solid var(--accent-line); border-radius: 16px; padding: 22px 24px; overflow: hidden; }
+.wf-card { position: relative; background: var(--surface); border: 1px solid var(--accent-line); border-radius: 14px; padding: 14px 18px; overflow: hidden; }
 .wf-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
-.wf-top { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.wf-top { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
 .wf-best { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .wf-rec { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent-line); background: var(--accent-soft); padding: 2px 9px; border-radius: 999px; }
-.wf-body { display: flex; justify-content: space-between; align-items: flex-start; gap: 28px; flex-wrap: wrap; }
+.wf-body { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .wf-left { display: flex; gap: 16px; align-items: flex-start; flex: 1 1 320px; min-width: 280px; }
 .wf-truck { flex: 0 0 auto; margin-top: 2px; }
 .wf-name { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .wf-warp { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
-.wf-desc { color: var(--muted); font-size: 13px; margin-top: 6px; max-width: 420px; }
+.wf-desc { color: var(--muted); font-size: 12px; margin-top: 3px; max-width: 420px; }
 .wf-tagline { color: var(--dim); font-style: italic; font-size: 12.5px; margin-top: 6px; }
-.wf-meta { color: var(--muted); font-size: 13px; margin-top: 12px; }
+.wf-meta { color: var(--muted); font-size: 12.5px; margin-top: 7px; }
 .wf-right { flex: 0 0 auto; min-width: 232px; display: flex; flex-direction: column; align-items: stretch; text-align: right; }
 .wf-pp-label { color: var(--dim); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-.wf-pp { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; margin-top: 2px; }
+.wf-pp { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; margin-top: 1px; }
 .wf-pp .u { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px; }
-.wf-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.wf-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 14px; }
 .wf-total .l { color: var(--muted); }
 .wf-total .v { font-weight: 700; font-size: 16px; }
 .wf-otp { color: var(--accent); font-size: 12.5px; font-weight: 500; margin-top: 8px; text-align: left; }
 .wf-cta { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; padding: 14px 20px; background: var(--accent); color: #07140C; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 11px; letter-spacing: 0.01em; transition: opacity 0.12s ease; }
 .wf-cta:hover { opacity: 0.92; }
-.wf-note { color: var(--dim); font-size: 11.5px; text-align: center; margin-top: 10px; }
+.wf-note { color: var(--dim); font-size: 11.5px; text-align: right; margin-top: 6px; }
 
 /* marketplace list */
-.wm-head { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 22px 0 10px; }
-.wm-list { display: flex; flex-direction: column; gap: 8px; }
-.wm-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: inherit; transition: background 0.12s ease, border-color 0.12s ease; }
+.wm-head { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 12px 0 7px; }
+.wm-list { display: flex; flex-direction: column; gap: 5px; }
+.wm-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; }
 .wm-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wm-tag { font-size: 10px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 5px; letter-spacing: 0.03em; }
-.wm-sub { color: var(--dim); font-size: 12.5px; margin-top: 5px; }
+.wm-sub { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
 .wm-price { display: flex; align-items: center; gap: 16px; white-space: nowrap; }
 .wm-price .p { font-size: 17px; font-weight: 700; }
 .wm-select { color: var(--muted); font-size: 13px; }
@@ -245,7 +245,6 @@ window.__warpRenderCard = function(data) {
   h += '<div class="wf-left"><div class="wf-truck">' + TRUCK + '</div><div>';
   h += '<div class="wf-name">Warp ' + esc(modeLabel) + ' <span class="wf-warp">WARP</span></div>';
   h += '<div class="wf-desc">Warp-direct pricing, live tracking included &#183; multi-stop network</div>';
-  h += '<div class="wf-tagline">Fewer terminal touches for smoother routing</div>';
   h += '<div class="wf-meta">&#128197; Pickup: ' + fmtDate(data.pickup_date) + '<span class="wh-sep">&#183;</span>&#128336; Transit: ' + days(w.transit_days) + '</div>';
   h += '</div></div>';
   h += '<div class="wf-right">';

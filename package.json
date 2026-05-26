@@ -1,6 +1,6 @@
 {
   "name": "warp-agent-mcp",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "MCP server for the Warp freight API. 16 tools covering the full booking lifecycle: quote (van/box-truck/FTL/LTL), book, track, events, invoices, documents, lane history, quote history, payment status, in-chat login, status, analytics. Renders inline quote cards in Claude and ChatGPT. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
   "keywords": [
     "warp",
