@@ -223,7 +223,10 @@ export class WarpClient {
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(url, {
       method: "POST", headers, body: JSON.stringify(body),
-      signal: AbortSignal.timeout(22000),
+      // The carrier poll runs ~17-27s in prod; 22s clipped it intermittently and
+      // the card fell back to Warp-only. 30s reliably catches it (route maxDuration
+      // is 45s). Still a ceiling — if it ever exceeds this we degrade gracefully.
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) return [];
     const j = await res.json() as Record<string, unknown>;
