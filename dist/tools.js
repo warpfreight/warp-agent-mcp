@@ -756,5 +756,57 @@ export function registerTools(server, client, getApiKey) {
         const analytics = getAnalytics();
         return { content: [{ type: "text", text: JSON.stringify(analytics, null, 2) }] };
     });
+    // ── warp_locations ─────────────────────────────────────────
+    server.tool("warp_locations", "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses. Auth required.", {}, { title: "List Saved Locations", readOnlyHint: true }, async () => {
+        try {
+            const data = await client.getLocations();
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            return { content: [{ type: "text", text: errText(err) }], isError: true };
+        }
+    });
+    // ── warp_load_templates ────────────────────────────────────
+    server.tool("warp_load_templates", "List the agent's saved load templates — reusable shipment configs (name, dims, weight, commodity). Recall one to quote/book a repeat kind of load without re-entering details. Auth required.", {}, { title: "List Load Templates", readOnlyHint: true }, async () => {
+        try {
+            const data = await client.getLoadTemplates();
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            return { content: [{ type: "text", text: errText(err) }], isError: true };
+        }
+    });
+    // ── warp_save_load_template ────────────────────────────────
+    server.tool("warp_save_load_template", "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes. Auth required.", {
+        name: z.string().describe("Friendly name, e.g. 'Standard 2-pallet LA load'"),
+        weight_lbs: z.number().min(1).describe("Total weight in lbs"),
+        length_in: z.number().min(1).describe("Length in inches"),
+        width_in: z.number().min(1).describe("Width in inches"),
+        height_in: z.number().min(1).describe("Height in inches"),
+        commodity: z.string().optional().describe("Commodity description"),
+        freight_class: z.string().optional().describe("Freight class (optional; FAK pricing if omitted)"),
+        stackable: z.boolean().optional().describe("Whether the freight is stackable"),
+        hazmat: z.boolean().optional().describe("Whether the freight is hazmat"),
+    }, { title: "Save Load Template" }, async (params) => {
+        try {
+            const data = await client.saveLoadTemplate(params);
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            return { content: [{ type: "text", text: errText(err) }], isError: true };
+        }
+    });
+    // ── warp_delete_load_template ──────────────────────────────
+    server.tool("warp_delete_load_template", "Delete a saved load template by its id (starts with lt_). Auth required.", {
+        load_template_id: z.string().describe("Template id to delete (starts with lt_)"),
+    }, { title: "Delete Load Template", destructiveHint: true }, async (params) => {
+        try {
+            await client.deleteLoadTemplate(params.load_template_id);
+            return { content: [{ type: "text", text: `Deleted load template ${params.load_template_id}.` }] };
+        }
+        catch (err) {
+            return { content: [{ type: "text", text: errText(err) }], isError: true };
+        }
+    });
 }
 //# sourceMappingURL=tools.js.map

@@ -248,6 +248,52 @@ export class WarpClient {
     return this._selfServeQuote("ltl", params);
   }
 
+  // ── Self-serve account helpers (saved locations + load templates) ──
+  // Hit the warp-site self-serve routes directly with Bearer auth, like quote/book
+  // (NOT the /warp gw proxy that `request()` uses).
+  private async _selfServe(
+    method: "GET" | "POST" | "DELETE",
+    path: string,
+    opts?: { body?: unknown; query?: Record<string, string> },
+  ): Promise<unknown> {
+    const key = this.getApiKey();
+    let url = `${this.selfServeOrigin}${path}`;
+    if (opts?.query) url += `?${new URLSearchParams(opts.query).toString()}`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: opts?.body ? JSON.stringify(opts.body) : undefined,
+      signal: AbortSignal.timeout(25000),
+    });
+    const text = await res.text();
+    let json: unknown;
+    try { json = JSON.parse(text); } catch { json = { raw: text }; }
+    if (!res.ok) throw new WarpApiError(res.status, json);
+    return json;
+  }
+
+  /** GET /api/v1/locations — the agent's saved pickup/delivery locations. */
+  async getLocations() {
+    return this._selfServe("GET", "/api/v1/locations");
+  }
+
+  /** GET /api/v1/load_templates — the agent's saved reusable load configs. */
+  async getLoadTemplates() {
+    return this._selfServe("GET", "/api/v1/load_templates");
+  }
+
+  /** POST /api/v1/load_templates — save a reusable load config. */
+  async saveLoadTemplate(params: Record<string, unknown>) {
+    return this._selfServe("POST", "/api/v1/load_templates", { body: params });
+  }
+
+  /** DELETE /api/v1/load_templates?id=lt_... — remove a saved load config. */
+  async deleteLoadTemplate(id: string) {
+    return this._selfServe("DELETE", "/api/v1/load_templates", { query: { id } });
+  }
+
     // ── Booking (auth) ────────────────────────────────────────────
 
   /**

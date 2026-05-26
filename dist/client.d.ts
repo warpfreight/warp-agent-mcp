@@ -37,6 +37,15 @@ export declare class WarpClient {
     boxTruckQuote(params: Record<string, unknown>): Promise<unknown>;
     ftlQuote(params: Record<string, unknown>): Promise<unknown>;
     ltlQuote(params: Record<string, unknown>, _originZip?: string, _destZip?: string): Promise<unknown>;
+    private _selfServe;
+    /** GET /api/v1/locations — the agent's saved pickup/delivery locations. */
+    getLocations(): Promise<unknown>;
+    /** GET /api/v1/load_templates — the agent's saved reusable load configs. */
+    getLoadTemplates(): Promise<unknown>;
+    /** POST /api/v1/load_templates — save a reusable load config. */
+    saveLoadTemplate(params: Record<string, unknown>): Promise<unknown>;
+    /** DELETE /api/v1/load_templates?id=lt_... — remove a saved load config. */
+    deleteLoadTemplate(id: string): Promise<unknown>;
     /**
      * Book a quoted shipment via the self-serve /api/v1/book endpoint.
      * Atomic: Stripe charge + gw.wearewarp.com booking in one server-side call.
