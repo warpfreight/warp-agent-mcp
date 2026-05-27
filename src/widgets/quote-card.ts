@@ -1,9 +1,11 @@
-// Inline quote-card widget for Warp MCP tools — multi-carrier comparison.
+// Inline quote-card widget for Warp MCP tools.
 //
-// Mirrors the customer-portal "Available options for this shipment" view: a
-// featured Warp "best option" card plus the marketplace carrier spread. For LTL
-// the spread comes from /api/v1/ltl/market-options (client.ts); other modes show
-// just the featured Warp option.
+// A single contained card: Warp wordmark header → "Available options" + lane →
+// a list of carriers (Warp's own rate featured at top, then the marketplace
+// spread) → footer. For LTL the spread comes from /api/v1/ltl/market-options
+// (client.ts); other modes show just the featured Warp option. Page background
+// is transparent and the palette is theme-adaptive (prefers-color-scheme) so it
+// blends natively into Claude — light or dark.
 //
 // Dual-platform — ONE painter (window.__warpRenderCard), two delivery paths:
 //   • ChatGPT (Apps SDK): window.openai.toolOutput.structuredContent.
@@ -92,8 +94,8 @@ export function toWidgetData(
       bookable: o.bookable === true,
     }))
     .sort((a, b) => a.rate_usd - b.rate_usd);
-  // Show the cheapest few inline; the rest live in the portal (32+ rows is too
-  // tall for a chat widget). The count pill still reflects the true total.
+  // Show the cheapest few inline; the rest are summarized as "+N more" (32+ rows
+  // is too tall for a chat card). The count pill still reflects the true total.
   const MAX_SHOWN = 6;
   const marketplace = marketplaceAll.slice(0, MAX_SHOWN);
 
@@ -122,157 +124,153 @@ export function toWidgetData(
   };
 }
 
+// Contained, Instacart-style card. Transparent page; palette defaults to LIGHT
+// and flips to dark only under prefers-color-scheme:dark — so it blends into
+// Claude's surface either way (and never renders as a dark slab on light).
 const CARD_CSS = `
 :root {
-  --bg: #0B0E13;
-  --surface: #11161E;
-  --surface-2: #141A23;
-  --line: rgba(255,255,255,0.07);
-  --text: #EEF2F7;
-  --muted: #93A0B2;
-  --dim: #6B7787;
-  --accent: #3EE07F;
-  --accent-soft: rgba(62,224,127,0.12);
-  --accent-line: rgba(62,224,127,0.35);
+  --card: #ffffff;
+  --line: #eceae3;
+  --line2: #f3f1ec;
+  --text: #1c1b19;
+  --muted: #6f7480;
+  --dim: #9a9ea6;
+  --accent: #15803d;
+  --accent-soft: rgba(21,128,61,0.10);
+  --warp-tint: rgba(21,128,61,0.045);
+  --icon-bg: #f1f0ec;
+  --icon-text: #5b6068;
+  --logo: #15803d;
+  --shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --card: #1b1b1d;
+    --line: #2f2f32;
+    --line2: #262629;
+    --text: #ececed;
+    --muted: #9a9aa2;
+    --dim: #71717a;
+    --accent: #3EE07F;
+    --accent-soft: rgba(62,224,127,0.14);
+    --warp-tint: rgba(62,224,127,0.06);
+    --icon-bg: #27272a;
+    --icon-text: #b6b6bd;
+    --logo: #00FF33;
+    --shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
 }
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
-  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
 }
-.warp-root { max-width: 860px; margin: 0 auto; padding: 12px 16px; }
-.mono { font-family: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace; }
-.wh-sep { color: var(--dim); margin: 0 2px; }
+.warp-root { max-width: 580px; margin: 0 auto; padding: 8px; }
+.wcard { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); }
 
-/* lane header */
-.wh-lane { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 14px; margin-bottom: 14px; }
-.wh-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--accent); display: inline-block; }
-.wh-arrow { color: var(--dim); }
-.wh-lane .z { color: var(--text); font-weight: 600; }
+/* header */
+.wh-head { display: flex; align-items: center; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.wh-logo { color: var(--logo); display: flex; align-items: center; }
+.wh-logo svg { height: 17px; width: auto; display: block; }
+.wh-ti { font-weight: 600; font-size: 13.5px; color: var(--text); }
 
-/* title + counts */
-.wh-title { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
-.wh-pill { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.01em; }
-.wh-pill-warp { background: var(--accent-soft); color: var(--accent); }
-.wh-pill-mkt { background: rgba(255,255,255,0.06); color: var(--muted); }
-.wh-subtitle { color: var(--dim); font-size: 13px; margin-bottom: 16px; }
+/* section header */
+.wh-sec { padding: 13px 16px 4px; }
+.wh-sec .st { font-weight: 700; font-size: 14.5px; }
+.wh-sec .ss { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
 
-/* featured warp card */
-.wf-card { position: relative; background: var(--surface); border: 1px solid var(--accent-line); border-radius: 14px; padding: 14px 18px; overflow: hidden; }
-.wf-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
-.wf-top { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
-.wf-best { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
-.wf-rec { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent-line); background: var(--accent-soft); padding: 2px 9px; border-radius: 999px; }
-.wf-body { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.wf-left { display: flex; gap: 16px; align-items: flex-start; flex: 1 1 320px; min-width: 280px; }
-.wf-truck { flex: 0 0 auto; margin-top: 2px; }
-.wf-name { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-.wf-warp { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
-.wf-desc { color: var(--muted); font-size: 12px; margin-top: 3px; max-width: 420px; }
-.wf-tagline { color: var(--dim); font-style: italic; font-size: 12.5px; margin-top: 6px; }
-.wf-meta { color: var(--muted); font-size: 12.5px; margin-top: 7px; }
-.wf-right { flex: 0 0 auto; min-width: 232px; display: flex; flex-direction: column; align-items: stretch; text-align: right; }
-.wf-pp-label { color: var(--dim); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-.wf-pp { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; margin-top: 1px; }
-.wf-pp .u { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px; }
-.wf-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 14px; }
-.wf-total .l { color: var(--muted); }
-.wf-total .v { font-weight: 700; font-size: 16px; }
-.wf-otp { color: var(--accent); font-size: 12.5px; font-weight: 500; margin-top: 8px; text-align: left; }
-.wf-cta { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; padding: 14px 20px; background: var(--accent); color: #07140C; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 11px; letter-spacing: 0.01em; transition: opacity 0.12s ease; }
-.wf-cta:hover { opacity: 0.92; }
-.wf-note { color: var(--dim); font-size: 11.5px; text-align: right; margin-top: 6px; }
-
-/* marketplace list */
-.wm-head { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 12px 0 7px; }
-.wm-list { display: flex; flex-direction: column; gap: 5px; }
-.wm-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; }
-.wm-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wm-tag { font-size: 10px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 5px; letter-spacing: 0.03em; }
-.wm-sub { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
-.wm-price { display: flex; align-items: center; gap: 16px; white-space: nowrap; }
-.wm-price .p { font-size: 17px; font-weight: 700; }
-.wm-select { color: var(--muted); font-size: 13px; }
-.wm-row:hover .wm-select { color: var(--accent); }
-.wm-foot { color: var(--dim); font-size: 11.5px; margin-top: 12px; text-align: center; }`;
+/* rows */
+.wm-list { padding: 6px 0 2px; }
+.wm-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.wm-row + .wm-row { border-top: 1px solid var(--line2); }
+.wm-row.warp { background: var(--warp-tint); }
+.wm-ic { width: 36px; height: 36px; border-radius: 9px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11.5px; background: var(--icon-bg); color: var(--icon-text); letter-spacing: 0.03em; }
+.wm-ic.warpic { background: var(--accent-soft); color: var(--accent); }
+.wm-mn { flex: 1 1 auto; min-width: 0; }
+.wm-nm { font-weight: 650; font-size: 13.5px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wm-me { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.wm-pr { font-weight: 700; font-size: 15px; white-space: nowrap; text-align: right; }
+.wm-pr small { display: block; color: var(--muted); font-weight: 500; font-size: 10.5px; margin-top: 1px; }
+.wm-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); letter-spacing: 0.02em; }
+.wm-more { padding: 9px 16px 4px; color: var(--muted); font-size: 12.5px; }
+.wm-foot { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; text-align: center; }`;
 
 const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 
-// Shared painter. Receives QuoteWidgetData and builds the comparison DOM. One
+// Shared painter. Receives QuoteWidgetData and builds the card DOM. One
 // definition; both the ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
 window.__warpRenderCard = function(data) {
   var root = document.getElementById("__warp_root");
   if (!root || !data || !data.warp) return;
-  var TRUCK = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#3EE07F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5h12v9h-12z"/><path d="M13.5 8h3.8l3.2 3.1v2.4h-7z"/><circle cx="6" cy="16.5" r="1.7"/><circle cx="17" cy="16.5" r="1.7"/></svg>';
+  var LOGO = '<svg viewBox="0 0 660 186" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="WARP"><path d="M660 185.035H0V0H660V185.035ZM14.0597 171.327H646.141V13.9593H14.0597V171.327Z" fill="currentColor"/><path d="M300.976 53.2756L332.509 131.608H351.239L319.705 53.2756H300.976Z" fill="currentColor"/><path d="M215.919 131.608H234.648L266.182 53.2756H247.453L215.919 131.608Z" fill="currentColor"/><path d="M150.892 107.405L136.431 71.3523H115.593L101.131 107.405L78.2342 53.2756H60.0068L93.047 131.608H109.517L125.987 90.5839L142.457 131.608H158.927L192.017 53.2756H173.739L150.892 107.405Z" fill="currentColor"/><path d="M471.856 82.8511C471.816 75.0646 468.691 67.6113 463.166 62.1242C457.642 56.6371 450.167 53.5636 442.381 53.5769H388.502V131.608H405.323V112.125H440.021L447.854 131.608H465.981L456.691 108.41C461.258 105.886 465.065 102.183 467.715 97.6881C470.364 93.1928 471.759 88.0691 471.755 82.8511H471.856ZM405.323 70.3481H442.381C445.71 70.3481 448.903 71.6706 451.257 74.0248C453.611 76.379 454.934 79.572 454.934 82.9013C454.934 86.2307 453.611 89.4236 451.257 91.7778C448.903 94.132 445.71 95.4546 442.381 95.4546H405.323V70.3481Z" fill="currentColor"/><path d="M570.768 53.5769H516.939V131.608H533.711V112.125H570.768C574.612 112.125 578.419 111.368 581.971 109.897C585.522 108.426 588.749 106.269 591.468 103.551C594.186 100.833 596.342 97.6055 597.814 94.0538C599.285 90.5021 600.042 86.6954 600.042 82.8511C600.042 79.0067 599.285 75.2 597.814 71.6483C596.342 68.0966 594.186 64.8695 591.468 62.1511C588.749 59.4327 585.522 57.2764 581.971 55.8053C578.419 54.3341 574.612 53.5769 570.768 53.5769ZM570.768 95.4043H533.711V70.2978H570.768C574.097 70.2978 577.29 71.6204 579.644 73.9746C581.998 76.3288 583.321 79.5217 583.321 82.8511C583.321 86.1804 581.998 89.3734 579.644 91.7276C577.29 94.0818 574.097 95.4043 570.768 95.4043Z" fill="currentColor"/><path d="M292.04 76.1794H275.219V94.1557H292.04V76.1794Z" fill="currentColor"/><path d="M275.219 131.615H292.04V113.84H275.219V131.615Z" fill="currentColor"/></svg>';
+  var TRUCK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 5h12v9h-12z"/><path d="M13.5 8.5h3.6l3.4 3v2.5h-7z"/><circle cx="6" cy="16.5" r="1.6"/><circle cx="17" cy="16.5" r="1.6"/></svg>';
   var MODE_LABEL = { van: "Cargo Van", "box-truck": "Box Truck", ftl: "Full Truckload", ltl: "LTL" };
   var modeLabel = MODE_LABEL[data.mode] || "LTL";
   var w = data.warp;
   var mkt = Array.isArray(data.marketplace) ? data.marketplace : [];
   var mktTotal = data.marketplace_count || mkt.length;
   var pallets = data.pallets || 1;
+  var isLtl = data.mode === "ltl";
 
   function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c];}); }
   function money(n){ return "$" + Math.round(Number(n)||0).toLocaleString("en-US"); }
   function fmtDate(s){ if(!s) return "--"; try{ var d=new Date(s+"T12:00:00Z"); return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",timeZone:"UTC"});}catch(e){return s;} }
   function days(n){ n=Number(n)||0; return n + (n===1?" day":" days"); }
+  function initials(s){ var t=String(s||"").replace(/[^A-Za-z]/g,""); return (t.slice(0,2)||"?").toUpperCase(); }
 
-  // No clickable book buttons in the agent widget — booking is conversational
-  // (the user asks the assistant to book, which calls warp_book). The card is
-  // purely informational: it shows the options + their bookable ids in the data.
-  var isLtl = data.mode === "ltl";
-  var bigVal = isLtl ? w.per_pallet : w.rate_usd;
-  var bigLabel = isLtl ? "PER PALLET" : "ALL-IN";
+  var SEP = ' &#183; ';
+  var h = '<div class="wcard">';
 
-  var h = "";
-  // lane header
-  h += '<div class="wh-lane"><span class="wh-dot"></span><span class="z mono">' + esc(data.origin_zip) + '</span> <span class="wh-arrow">&#8594;</span> <span class="z mono">' + esc(data.destination_zip) + '</span><span class="wh-sep">&#183;</span>' + fmtDate(data.pickup_date) + '<span class="wh-sep">&#183;</span>' + pallets + (pallets===1?" pallet":" pallets") + '</div>';
-  // title + counts
-  h += '<div class="wh-title">Available options for this shipment';
-  h += ' <span class="wh-pill wh-pill-warp">&#8226; ' + (data.warp_count||1) + ' Warp</span>';
-  if (mktTotal) h += '<span class="wh-pill wh-pill-mkt">' + mktTotal + ' Marketplace</span>';
+  // header — real Warp wordmark + "Freight"
+  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span></div>';
+
+  // section header — "Available options" + the lane
+  h += '<div class="wh-sec"><div class="st">Available options</div><div class="ss">' +
+    esc(data.origin_zip) + ' &#8594; ' + esc(data.destination_zip) + SEP + fmtDate(data.pickup_date) +
+    SEP + pallets + (pallets===1?" pallet":" pallets") + SEP + esc(modeLabel) + '</div></div>';
+
+  // list — Warp featured row first
+  h += '<div class="wm-list">';
+  var warpPr = '<div class="wm-pr">' + money(w.rate_usd) +
+    (isLtl ? '<small>' + money(w.per_pallet) + ' / pallet</small>' : '<small>all-in</small>') + '</div>';
+  h += '<div class="wm-row warp"><div class="wm-ic warpic">' + TRUCK + '</div>' +
+    '<div class="wm-mn"><div class="wm-nm">Warp ' + esc(modeLabel) + ' <span class="wm-badge">Recommended</span></div>' +
+    '<div class="wm-me">' + days(w.transit_days) + SEP + (w.on_time_pct||98.2) + '% on-time' + SEP + 'all-inclusive</div></div>' +
+    warpPr + '</div>';
+
+  // marketplace rows
+  mkt.forEach(function(o){
+    h += '<div class="wm-row"><div class="wm-ic">' + esc(initials(o.carrier_name)) + '</div>' +
+      '<div class="wm-mn"><div class="wm-nm">' + esc(o.carrier_name) + '</div>' +
+      '<div class="wm-me">' + days(o.transit_days) + SEP + esc(modeLabel) + '</div></div>' +
+      '<div class="wm-pr">' + money(o.rate_usd) + '</div></div>';
+  });
   h += '</div>';
-  h += '<div class="wh-subtitle">' + (mkt.length ? "All rates loaded." : "Warp-direct rate for this lane.") + '</div>';
 
-  // featured Warp card
-  h += '<div class="wf-card">';
-  h += '<div class="wf-top"><span class="wf-best">&#8226; Best option for this shipment</span><span class="wf-rec">Recommended</span></div>';
-  h += '<div class="wf-body">';
-  h += '<div class="wf-left"><div class="wf-truck">' + TRUCK + '</div><div>';
-  h += '<div class="wf-name">Warp ' + esc(modeLabel) + ' <span class="wf-warp">WARP</span></div>';
-  h += '<div class="wf-desc">Warp-direct pricing, live tracking included &#183; multi-stop network</div>';
-  h += '<div class="wf-meta">&#128197; Pickup: ' + fmtDate(data.pickup_date) + '<span class="wh-sep">&#183;</span>&#128336; Transit: ' + days(w.transit_days) + '</div>';
-  h += '</div></div>';
-  h += '<div class="wf-right">';
-  h += '<div class="wf-pp-label">' + bigLabel + '</div>';
-  h += '<div class="wf-pp">' + money(bigVal) + (isLtl ? '' : '<span class="u">all-in</span>') + '</div>';
-  if (isLtl) h += '<div class="wf-total"><span class="l">Total</span><span class="v">' + money(w.rate_usd) + '</span></div>';
-  h += '<div class="wf-otp">Warp ' + esc(modeLabel) + ' &#183; ' + (w.on_time_pct||98.2) + '% on-time delivery</div>';
-  h += '<div class="wf-note">' + (w.payment_ready ? "Card on file." : "Card required to book.") + '</div>';
-  h += '</div></div></div>';
+  // "+N more carriers"
+  var more = mktTotal - mkt.length;
+  if (more > 0) h += '<div class="wm-more">+' + more + ' more carriers</div>';
 
-  // marketplace spread
+  // footer
+  var anyBookable = mkt.some(function(o){ return o && o.bookable; });
+  var foot;
   if (mkt.length) {
-    h += '<div class="wm-head">Other ' + esc(modeLabel) + ' carriers</div><div class="wm-list">';
-    mkt.forEach(function(o){
-      h += '<div class="wm-row">';
-      h += '<div><div class="wm-name">' + esc(o.carrier_name) + ' <span class="wm-tag">' + esc(modeLabel) + '</span></div>';
-      h += '<div class="wm-sub">Transit: ' + days(o.transit_days) + '<span class="wh-sep">&#183;</span>Pickup: ' + esc(data.pickup_date) + '</div></div>';
-      h += '<div class="wm-price"><span class="p">' + money(o.rate_usd) + '</span></div>';
-      h += '</div>';
-    });
-    var more = mktTotal - mkt.length;
-    var anyBookable = mkt.some(function(o){ return o && o.bookable; });
-    var footMsg = anyBookable
-      ? "Ask me to book any of these carriers directly."
-      : "Marketplace rates are indicative; booking opens Warp at customer.wearewarp.com.";
-    h += '</div><div class="wm-foot">' + (more > 0 ? ("+" + more + " more carriers &#183; ") : "") + footMsg + '</div>';
+    foot = anyBookable
+      ? "All-inclusive pricing &#183; ask me to book any carrier directly"
+      : "All-inclusive pricing &#183; sign in to book a specific carrier";
+  } else {
+    foot = w.payment_ready
+      ? "All-inclusive pricing &#183; ask me to book it"
+      : "All-inclusive pricing &#183; add a card to book";
   }
+  h += '<div class="wm-foot">' + foot + '</div>';
 
+  h += '</div>';
   root.innerHTML = h;
 };`;
 
@@ -299,9 +297,8 @@ function buildHtml(opts: { clientScript: string; dataScript?: string }): string 
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
 <title>Warp Quote</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" />
 <style>${CARD_CSS}</style>
 </head>
 <body>
