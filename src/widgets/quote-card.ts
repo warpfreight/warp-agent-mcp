@@ -94,9 +94,9 @@ export function toWidgetData(
       bookable: o.bookable === true,
     }))
     .sort((a, b) => a.rate_usd - b.rate_usd);
-  // Show the cheapest few inline; the rest are summarized as "+N more" (32+ rows
-  // is too tall for a chat card). The count pill still reflects the true total.
-  const MAX_SHOWN = 6;
+  // Include all carriers — the card renders them in a fixed-height scroll area,
+  // so the overall card stays compact while every option stays reachable.
+  const MAX_SHOWN = 50;
   const marketplace = marketplaceAll.slice(0, MAX_SHOWN);
 
   return {
@@ -185,6 +185,13 @@ html, body {
 
 /* rows */
 .wm-list { padding: 6px 0 2px; }
+/* Fixed-height scroll area for the marketplace carriers: the card stays small
+   and clean; the user scrolls the list to see every carrier. Warp's row is
+   pinned above this, always visible. */
+.wm-scroll { max-height: 264px; overflow-y: auto; border-top: 1px solid var(--line2); -webkit-overflow-scrolling: touch; }
+.wm-scroll::-webkit-scrollbar { width: 8px; }
+.wm-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+.wm-scroll::-webkit-scrollbar-track { background: transparent; }
 .wm-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
 .wm-row + .wm-row { border-top: 1px solid var(--line2); }
 .wm-row.warp { background: var(--warp-tint); }
@@ -243,18 +250,19 @@ window.__warpRenderCard = function(data) {
     '<div class="wm-me">' + days(w.transit_days) + SEP + (w.on_time_pct||98.2) + '% on-time' + SEP + 'all-inclusive</div></div>' +
     warpPr + '</div>';
 
-  // marketplace rows
-  mkt.forEach(function(o){
-    h += '<div class="wm-row"><div class="wm-ic">' + esc(initials(o.carrier_name)) + '</div>' +
-      '<div class="wm-mn"><div class="wm-nm">' + esc(o.carrier_name) + '</div>' +
-      '<div class="wm-me">' + days(o.transit_days) + SEP + esc(modeLabel) + '</div></div>' +
-      '<div class="wm-pr">' + money(o.rate_usd) + '</div></div>';
-  });
+  // marketplace rows — in a fixed-height scroll area, so the card stays compact
+  // while every carrier is reachable (no "+N more" dead-end).
+  if (mkt.length) {
+    h += '<div class="wm-scroll">';
+    mkt.forEach(function(o){
+      h += '<div class="wm-row"><div class="wm-ic">' + esc(initials(o.carrier_name)) + '</div>' +
+        '<div class="wm-mn"><div class="wm-nm">' + esc(o.carrier_name) + '</div>' +
+        '<div class="wm-me">' + days(o.transit_days) + SEP + esc(modeLabel) + '</div></div>' +
+        '<div class="wm-pr">' + money(o.rate_usd) + '</div></div>';
+    });
+    h += '</div>';
+  }
   h += '</div>';
-
-  // "+N more carriers"
-  var more = mktTotal - mkt.length;
-  if (more > 0) h += '<div class="wm-more">+' + more + ' more carriers</div>';
 
   // footer
   var anyBookable = mkt.some(function(o){ return o && o.bookable; });
