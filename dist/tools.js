@@ -3,6 +3,7 @@ import { WarpApiError } from "./client.js";
 import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
 import { isCanadianPostal } from "./policy.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, renderQuoteCard, toWidgetData, } from "./widgets/quote-card.js";
+import { BOOKINGS_CARD_RESOURCE_URI, BOOKINGS_CARD_MCP_RESOURCE_URI, renderBookingsCard, toBookingsWidgetData, trackingUrl, } from "./widgets/bookings-card.js";
 // Claude / MCP Apps (SEP-1865) UI linkage. Goes on each quote tool DEFINITION
 // (so the host knows to render the card) and on the result. ChatGPT ignores
 // these and uses the openai/* keys instead; the two namespaces don't collide.
@@ -24,6 +25,41 @@ function quoteToolResult(mode, input, data) {
     if (widget) {
         result.structuredContent = widget;
         result._meta = { "openai/outputTemplate": QUOTE_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...UI_META };
+    }
+    return result;
+}
+// MCP Apps UI linkage for the bookings/shipments card (warp_list_bookings).
+const BOOKINGS_UI_META = {
+    ui: { resourceUri: BOOKINGS_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
+    "ui/resourceUri": BOOKINGS_CARD_MCP_RESOURCE_URI,
+};
+// Wrap warp_list_bookings so UI-capable clients render the inline mini-TMS card.
+// The text payload is enriched with a canonical `tracking_url` per shipment so
+// the model never has to fabricate a tracking link (it had been guessing the
+// wrong host). Non-UI clients fall back to that enriched JSON.
+function bookingsToolResult(data) {
+    const widget = toBookingsWidgetData(data);
+    // Enrich the raw response: attach tracking_url (https://tracking.wearewarp.com/<orderNumber>)
+    // to each shipment in the text output, without dropping any original fields.
+    let textPayload = data;
+    const rows = Array.isArray(data.data)
+        ? (data.data)
+        : null;
+    if (rows) {
+        const enriched = rows.map((s) => ({
+            ...s,
+            tracking_url: trackingUrl(typeof s.orderNumber === "string" ? s.orderNumber : undefined),
+        }));
+        textPayload = { ...data, data: enriched };
+    }
+    const content = [{ type: "text", text: JSON.stringify(textPayload, null, 2) }];
+    if (widget) {
+        content.push({ type: "resource", resource: { uri: BOOKINGS_CARD_RESOURCE_URI, mimeType: "text/html", text: renderBookingsCard(widget) } });
+    }
+    const result = { content };
+    if (widget) {
+        result.structuredContent = widget;
+        result._meta = { "openai/outputTemplate": BOOKINGS_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...BOOKINGS_UI_META };
     }
     return result;
 }
@@ -426,7 +462,17 @@ export function registerTools(server, client, getApiKey) {
                 tracking_number: params.shipment_id,
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+            // Enrich with the canonical public tracking URL so the model links to the
+            // real tracking page (https://tracking.wearewarp.com/<orderNumber>) instead
+            // of fabricating one. The gw tracking record carries orderNumber (P-…).
+            const records = Array.isArray(data) ? data : null;
+            const out = records
+                ? records.map((r) => ({
+                    ...r,
+                    tracking_url: trackingUrl(typeof r.orderNumber === "string" ? r.orderNumber : undefined),
+                }))
+                : data;
+            return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
         }
         catch (err) {
             trackEvent({
@@ -470,7 +516,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 9. warp_list_bookings ───────────────────────────────────────
-    server.tool("warp_list_bookings", "List recent bookings for this API key, newest first. Auth required.", {
+    const listBookingsTool = server.tool("warp_list_bookings", "List recent bookings for this API key, newest first. Auth required. Renders an interactive shipments card (click a shipment to expand pickup/delivery, freight, and a tracking link).", {
         limit: z.number().int().min(1).max(100).optional().describe("Max bookings to return (default 25, max 100)"),
     }, { title: "List Bookings", readOnlyHint: true }, async (params) => {
         const start = Date.now();
@@ -484,7 +530,7 @@ export function registerTools(server, client, getApiKey) {
                 success: true,
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+            return bookingsToolResult(data);
         }
         catch (err) {
             trackEvent({
@@ -499,6 +545,8 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: errText(err) }], isError: true };
         }
     });
+    // Advertise the Claude / MCP Apps shipments card on the tool definition.
+    listBookingsTool?.update({ _meta: BOOKINGS_UI_META });
     // ── 11. warp_status ─────────────────────────────────────────────
     server.tool("warp_status", "Check Warp API health and version. Also validates your API key if one is configured.", {}, { title: "Check API Status", readOnlyHint: true }, async () => {
         const start = Date.now();

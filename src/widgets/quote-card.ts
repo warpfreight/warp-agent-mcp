@@ -170,7 +170,10 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 .warp-root { max-width: 580px; margin: 0 auto; padding: 8px; }
-.wcard { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); }
+.wcard { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow);
+  animation: warpCardIn 0.42s cubic-bezier(0.16,1,0.3,1) both; }
+@keyframes warpCardIn { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes warpRowIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 
 /* header */
 .wh-head { display: flex; align-items: center; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
@@ -204,7 +207,21 @@ html, body {
 .wm-pr small { display: block; color: var(--muted); font-weight: 500; font-size: 10.5px; margin-top: 1px; }
 .wm-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); letter-spacing: 0.02em; }
 .wm-more { padding: 9px 16px 4px; color: var(--muted); font-size: 12.5px; }
-.wm-foot { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; text-align: center; }`;
+.wm-foot { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; text-align: center; }
+/* Rows fade/slide in with a gentle stagger as the card opens. Warp's featured
+   row leads; the marketplace rows follow. */
+.wm-row { animation: warpRowIn 0.44s cubic-bezier(0.16,1,0.3,1) both; }
+.wm-row.warp { animation-delay: 0.06s; }
+.wm-scroll .wm-row:nth-child(1) { animation-delay: 0.10s; }
+.wm-scroll .wm-row:nth-child(2) { animation-delay: 0.14s; }
+.wm-scroll .wm-row:nth-child(3) { animation-delay: 0.18s; }
+.wm-scroll .wm-row:nth-child(4) { animation-delay: 0.22s; }
+.wm-scroll .wm-row:nth-child(5) { animation-delay: 0.26s; }
+.wm-scroll .wm-row:nth-child(6) { animation-delay: 0.30s; }
+.wm-scroll .wm-row:nth-child(n+7) { animation-delay: 0.34s; }
+@media (prefers-reduced-motion: reduce) {
+  .wcard, .wm-row { animation: none !important; }
+}`;
 
 const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 

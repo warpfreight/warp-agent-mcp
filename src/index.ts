@@ -9,6 +9,12 @@ import {
   quoteCardTemplate,
   quoteCardMcpTemplate,
 } from "./widgets/quote-card.js";
+import {
+  BOOKINGS_CARD_RESOURCE_URI,
+  BOOKINGS_CARD_MCP_RESOURCE_URI,
+  bookingsCardTemplate,
+  bookingsCardMcpTemplate,
+} from "./widgets/bookings-card.js";
 
 // Node 20+ is required for native fetch and the MCP SDK. npx -y ignores the
 // "engines" field, so a user on an older Node crashes with a cryptic
@@ -150,6 +156,35 @@ server.registerResource(
   },
   async () => ({
     contents: [{ uri: QUOTE_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: quoteCardMcpTemplate() }],
+  }),
+);
+
+// Inline bookings/shipments card — a mini-TMS shown after warp_list_bookings.
+// ChatGPT (text/html) reads structuredContent; Claude (mcp-app) gets the result
+// over the postMessage bridge. Clients without UI fall back to the text JSON.
+server.registerResource(
+  "warp-bookings-card",
+  BOOKINGS_CARD_RESOURCE_URI,
+  {
+    description:
+      "Inline shipments card shown after warp_list_bookings. Lists shipments as clickable rows; each expands to pickup/delivery detail, freight, and a Track shipment deep-link.",
+    mimeType: "text/html",
+  },
+  async () => ({
+    contents: [{ uri: BOOKINGS_CARD_RESOURCE_URI, mimeType: "text/html", text: bookingsCardTemplate() }],
+  }),
+);
+
+server.registerResource(
+  "warp-bookings-card-mcp",
+  BOOKINGS_CARD_MCP_RESOURCE_URI,
+  {
+    description:
+      "Inline shipments card (MCP Apps) shown after warp_list_bookings. Clickable shipment rows expand to full detail with a Track shipment deep-link.",
+    mimeType: MCP_APP_MIME_TYPE,
+  },
+  async () => ({
+    contents: [{ uri: BOOKINGS_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: bookingsCardMcpTemplate() }],
   }),
 );
 
