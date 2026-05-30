@@ -74,6 +74,7 @@ export function toWidgetData(mode, input, response) {
         marketplace,
         warp_count: 1,
         marketplace_count: marketplaceAll.length,
+        loading_market: mode === "ltl" && marketplaceAll.length === 0 && response.loading_market === true,
     };
 }
 // Contained, Instacart-style card. Transparent page; palette defaults to LIGHT
@@ -160,6 +161,43 @@ html, body {
 .wm-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); letter-spacing: 0.02em; }
 .wm-more { padding: 9px 16px 4px; color: var(--muted); font-size: 12.5px; }
 .wm-foot { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; text-align: center; }
+/* Skeleton-row block shown beneath the Warp featured row while the carrier
+   spread (warp_ltl_market_options) is still fetching. Shimmering placeholders
+   communicate "more is coming" without leaving an empty space. */
+.wm-skel { padding: 4px 0 2px; border-top: 1px solid var(--line2); }
+.wm-skel-row { display: flex; align-items: center; gap: 12px; padding: 11px 16px; }
+.wm-skel-row + .wm-skel-row { border-top: 1px solid var(--line2); }
+.wm-skel-ic, .wm-skel-line, .wm-skel-pr {
+  background: linear-gradient(90deg, var(--line2) 0%, var(--line) 50%, var(--line2) 100%);
+  background-size: 220% 100%;
+  animation: warpShimmer 1.6s ease-in-out infinite;
+  border-radius: 4px;
+}
+.wm-skel-ic { width: 36px; height: 36px; border-radius: 9px; flex: 0 0 auto; }
+.wm-skel-body { flex: 1 1 auto; }
+.wm-skel-line { height: 11px; margin-bottom: 6px; width: 60%; }
+.wm-skel-line.b { width: 38%; height: 9px; margin-bottom: 0; }
+.wm-skel-pr { width: 46px; height: 13px; }
+.wm-skel-row:nth-child(2) .wm-skel-line { width: 52%; }
+.wm-skel-row:nth-child(2) .wm-skel-line.b { width: 32%; }
+.wm-skel-row:nth-child(3) .wm-skel-line { width: 68%; }
+.wm-skel-row:nth-child(3) .wm-skel-line.b { width: 42%; }
+@keyframes warpShimmer {
+  0%   { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+.wm-loading-note {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 11px 16px 6px; color: var(--muted); font-size: 12px; font-weight: 500;
+}
+.wm-loading-dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--accent);
+  animation: warpPulse 1.2s ease-in-out infinite;
+}
+@keyframes warpPulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50%      { opacity: 1.0;  transform: scale(1); }
+}
 /* Rows fade/slide in with a gentle stagger as the card opens. Warp's featured
    row leads; the marketplace rows follow. */
 .wm-row { animation: warpRowIn 0.44s cubic-bezier(0.16,1,0.3,1) both; }
@@ -172,7 +210,7 @@ html, body {
 .wm-scroll .wm-row:nth-child(6) { animation-delay: 0.30s; }
 .wm-scroll .wm-row:nth-child(n+7) { animation-delay: 0.34s; }
 @media (prefers-reduced-motion: reduce) {
-  .wcard, .wm-row { animation: none !important; }
+  .wcard, .wm-row, .wm-skel-ic, .wm-skel-line, .wm-skel-pr, .wm-loading-dot { animation: none !important; }
 }`;
 const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 // Shared painter. Receives QuoteWidgetData and builds the card DOM. One
@@ -218,7 +256,10 @@ window.__warpRenderCard = function(data) {
     warpPr + '</div>';
 
   // marketplace rows — in a fixed-height scroll area, so the card stays compact
-  // while every carrier is reachable (no "+N more" dead-end).
+  // while every carrier is reachable (no "+N more" dead-end). When the spread
+  // is still loading (warp_ltl_quote fired, warp_ltl_market_options pending),
+  // render shimmering skeleton rows + a "finding other carriers" footer so the
+  // card communicates that more is coming.
   if (mkt.length) {
     h += '<div class="wm-scroll">';
     mkt.forEach(function(o){
@@ -228,13 +269,24 @@ window.__warpRenderCard = function(data) {
         '<div class="wm-pr">' + money(o.rate_usd) + '</div></div>';
     });
     h += '</div>';
+  } else if (data.loading_market) {
+    h += '<div class="wm-skel">';
+    for (var s = 0; s < 3; s++) {
+      h += '<div class="wm-skel-row"><div class="wm-skel-ic"></div>' +
+        '<div class="wm-skel-body"><div class="wm-skel-line"></div><div class="wm-skel-line b"></div></div>' +
+        '<div class="wm-skel-pr"></div></div>';
+    }
+    h += '<div class="wm-loading-note"><span class="wm-loading-dot"></span>Finding 30+ more carrier rates &#183; ~15s</div>';
+    h += '</div>';
   }
   h += '</div>';
 
   // footer
   var anyBookable = mkt.some(function(o){ return o && o.bookable; });
   var foot;
-  if (mkt.length) {
+  if (data.loading_market && !mkt.length) {
+    foot = "Warp rate ready &#183; comparing 30+ carriers&hellip;";
+  } else if (mkt.length) {
     foot = anyBookable
       ? "All-inclusive pricing &#183; ask me to book any carrier directly"
       : "All-inclusive pricing &#183; sign in to book a specific carrier";

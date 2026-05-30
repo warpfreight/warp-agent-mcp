@@ -13,6 +13,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = [
   { entry: "quote-card-client.ts", out: "quote-card-client-bundle.ts", name: "APP_CLIENT_BUNDLE" },
   { entry: "bookings-card-client.ts", out: "bookings-card-client-bundle.ts", name: "BOOKINGS_APP_CLIENT_BUNDLE" },
+  { entry: "batch-quote-card-client.ts", out: "batch-quote-card-client-bundle.ts", name: "BATCH_QUOTE_APP_CLIENT_BUNDLE" },
+  { entry: "batch-book-card-client.ts",  out: "batch-book-card-client-bundle.ts",  name: "BATCH_BOOK_APP_CLIENT_BUNDLE"  },
 ];
 
 for (const t of targets) {

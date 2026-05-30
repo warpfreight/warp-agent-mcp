@@ -31,12 +31,43 @@ export declare class WarpClient {
      * proxy to warp-freight-api.vercel.app — no MCP change needed at that point.
      */
     private get selfServeOrigin();
+    private buildQuoteBody;
     private _selfServeQuote;
+    ltlMarketOptions(params: Record<string, unknown>): Promise<unknown[]>;
     private _ltlMarketOptions;
     vanQuote(params: Record<string, unknown>): Promise<unknown>;
     boxTruckQuote(params: Record<string, unknown>): Promise<unknown>;
     ftlQuote(params: Record<string, unknown>): Promise<unknown>;
     ltlQuote(params: Record<string, unknown>, _originZip?: string, _destZip?: string): Promise<unknown>;
+    batchQuote(lanes: Array<Record<string, unknown>>, concurrency?: number): Promise<Array<{
+        row: number;
+        ok: boolean;
+        mode: string;
+        input: Record<string, unknown>;
+        result?: Record<string, unknown>;
+        error?: string;
+    }>>;
+    batchBook(rows: Array<Record<string, unknown>>, shared?: {
+        pickup?: Record<string, unknown>;
+        delivery?: Record<string, unknown>;
+        accessorials?: Record<string, unknown>;
+        pickup_window?: Record<string, unknown>;
+        delivery_window?: Record<string, unknown>;
+        notes?: string;
+        reference?: string;
+    }): Promise<Array<{
+        row: number;
+        ok: boolean;
+        quote_id: string;
+        pickup_zip?: string;
+        delivery_zip?: string;
+        tracking_number?: string;
+        order_id?: string;
+        booking_url?: string;
+        amount_usd?: number;
+        raw?: Record<string, unknown>;
+        error?: string;
+    }>>;
     private _selfServe;
     /** GET /api/v1/locations — the agent's saved pickup/delivery locations. */
     getLocations(): Promise<unknown>;

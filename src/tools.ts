@@ -18,6 +18,18 @@ import {
   toBookingsWidgetData,
   trackingUrl,
 } from "./widgets/bookings-card.js";
+import {
+  BATCH_QUOTE_CARD_RESOURCE_URI,
+  BATCH_QUOTE_CARD_MCP_RESOURCE_URI,
+  renderBatchQuoteCard,
+  toBatchQuoteWidgetData,
+} from "./widgets/batch-quote-card.js";
+import {
+  BATCH_BOOK_CARD_RESOURCE_URI,
+  BATCH_BOOK_CARD_MCP_RESOURCE_URI,
+  renderBatchBookCard,
+  toBatchBookWidgetData,
+} from "./widgets/batch-book-card.js";
 
 // Claude / MCP Apps (SEP-1865) UI linkage. Goes on each quote tool DEFINITION
 // (so the host knows to render the card) and on the result. ChatGPT ignores
@@ -52,6 +64,69 @@ const BOOKINGS_UI_META: Record<string, unknown> = {
   ui: { resourceUri: BOOKINGS_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
   "ui/resourceUri": BOOKINGS_CARD_MCP_RESOURCE_URI,
 };
+
+// MCP Apps UI linkage for the batch-quote card (warp_batch_quote).
+const BATCH_QUOTE_UI_META: Record<string, unknown> = {
+  ui: { resourceUri: BATCH_QUOTE_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
+  "ui/resourceUri": BATCH_QUOTE_CARD_MCP_RESOURCE_URI,
+};
+
+// MCP Apps UI linkage for the batch-book progress card (warp_batch_book).
+const BATCH_BOOK_UI_META: Record<string, unknown> = {
+  ui: { resourceUri: BATCH_BOOK_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
+  "ui/resourceUri": BATCH_BOOK_CARD_MCP_RESOURCE_URI,
+};
+
+// Wrap a batch-book result so UI-capable clients render the single consolidated
+// progress card (one row per booking, Booked/Failed pill, tracking link).
+// Non-UI clients get the same data as JSON text.
+function batchBookToolResult(rawRows: Array<{
+  row: number; ok: boolean; quote_id: string;
+  pickup_zip?: string; delivery_zip?: string;
+  tracking_number?: string; order_id?: string;
+  booking_url?: string; amount_usd?: number;
+  raw?: Record<string, unknown>; error?: string;
+}>): CallToolResult {
+  const widget = toBatchBookWidgetData(rawRows);
+  const textPayload = {
+    total: rawRows.length,
+    succeeded: rawRows.filter((r) => r.ok).length,
+    failed: rawRows.filter((r) => !r.ok).length,
+    rows: rawRows,
+  };
+  const content: CallToolResult["content"] = [{ type: "text", text: JSON.stringify(textPayload, null, 2) }];
+  if (widget) {
+    content.push({ type: "resource", resource: { uri: BATCH_BOOK_CARD_RESOURCE_URI, mimeType: "text/html", text: renderBatchBookCard(widget) } });
+  }
+  const result: CallToolResult = { content };
+  if (widget) {
+    result.structuredContent = widget as unknown as Record<string, unknown>;
+    result._meta = { "openai/outputTemplate": BATCH_BOOK_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...BATCH_BOOK_UI_META };
+  }
+  return result;
+}
+
+// Wrap a batch-quote result so UI-capable clients render the single consolidated
+// card. Non-UI clients get the same data as JSON text.
+function batchQuoteToolResult(rawLanes: Array<{ row: number; ok: boolean; mode: string; input: Record<string, unknown>; result?: Record<string, unknown>; error?: string }>): CallToolResult {
+  const widget = toBatchQuoteWidgetData(rawLanes);
+  const textPayload = {
+    total: rawLanes.length,
+    succeeded: rawLanes.filter((r) => r.ok).length,
+    failed: rawLanes.filter((r) => !r.ok).length,
+    lanes: rawLanes,
+  };
+  const content: CallToolResult["content"] = [{ type: "text", text: JSON.stringify(textPayload, null, 2) }];
+  if (widget) {
+    content.push({ type: "resource", resource: { uri: BATCH_QUOTE_CARD_RESOURCE_URI, mimeType: "text/html", text: renderBatchQuoteCard(widget) } });
+  }
+  const result: CallToolResult = { content };
+  if (widget) {
+    result.structuredContent = widget as unknown as Record<string, unknown>;
+    result._meta = { "openai/outputTemplate": BATCH_QUOTE_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...BATCH_QUOTE_UI_META };
+  }
+  return result;
+}
 
 // Wrap warp_list_bookings so UI-capable clients render the inline mini-TMS card.
 // The text payload is enriched with a canonical `tracking_url` per shipment so
@@ -285,7 +360,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   const ltlQuoteTool = server.tool(
     "warp_ltl_quote",
-    "Quote an LTL shipment. Provide dims + commodity for a firm quote; omit for indicative pricing (FAK rates if no freight class). Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
+    "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling warp_ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for a firm quote; omit for indicative pricing (FAK rates if no freight class). Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
       destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -354,13 +429,162 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
+  // ── 4b. warp_ltl_market_options ─────────────────────────────────
+  // Follow-up to warp_ltl_quote: fetches the 30+ carrier spread (~15s) AND
+  // re-issues the Warp quote in parallel, then renders the same inline quote
+  // card with the comparison filled in. Same input schema as warp_ltl_quote.
+
+  const ltlMarketOptionsTool = server.tool(
+    "warp_ltl_market_options",
+    "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER warp_ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list.",
+    {
+      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
+      pallets: z.number().int().min(1).max(26).optional().describe("Number of pallets"),
+      weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet in lbs"),
+      commodity: z.string().optional().describe("Commodity description"),
+      length_in: z.number().positive().optional().describe("Pallet length in inches"),
+      width_in: z.number().positive().optional().describe("Pallet width in inches"),
+      height_in: z.number().positive().optional().describe("Pallet height in inches"),
+      freight_class: z.string().optional().describe("Freight class (optional, FAK rates used if omitted)"),
+      stackable: z.boolean().optional().describe("Whether pallets are stackable"),
+      hazmat: z.boolean().optional().describe("Hazardous materials flag"),
+      pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
+      delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
+    },
+    { title: "Compare LTL Carriers", readOnlyHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
+          return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
+        }
+        // Fire Warp quote + carrier spread in parallel. Total latency ≈ slow (~15s).
+        const [warpRaw, marketOptions] = await Promise.all([
+          client.ltlQuote(params, params.origin_zip, params.destination_zip).catch(() => ({})) as Promise<Record<string, unknown>>,
+          client.ltlMarketOptions(params).catch(() => [] as unknown[]),
+        ]);
+        // Cache Warp quote amount so warp_book can log revenue
+        const qid = warpRaw?.warp_quote_id as string | undefined;
+        const qamt = warpRaw?.warp_price as number | undefined;
+        if (qid && qamt) quoteAmountCache.set(qid, qamt);
+        // Combine for the card: Warp featured + filled-in spread, loading flag cleared.
+        const combined: Record<string, unknown> = {
+          ...warpRaw,
+          market_options: marketOptions,
+          loading_market: false,
+        };
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'quote',
+          tool_name: 'warp_ltl_market_options',
+          success: true,
+          origin_zip: params.origin_zip as string,
+          dest_zip: params.destination_zip as string,
+          mode: 'ltl',
+          amount_usd: qamt,
+          quote_id: qid,
+          duration_ms: Date.now() - start,
+        });
+        return quoteToolResult("ltl", params, combined);
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_ltl_market_options',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: errText(err) }], isError: true };
+      }
+    },
+  );
+
   // Advertise the Claude / MCP Apps UI resource on each quote tool definition so
   // the host renders the inline quote card. ChatGPT uses the result _meta instead.
   // Optional-chained: registerTools also runs with a stub server in tests whose
   // tool() returns no handle — there the update is simply a no-op.
-  for (const t of [vanQuoteTool, boxTruckQuoteTool, ftlQuoteTool, ltlQuoteTool]) {
+  for (const t of [vanQuoteTool, boxTruckQuoteTool, ftlQuoteTool, ltlQuoteTool, ltlMarketOptionsTool]) {
     t?.update({ _meta: UI_META });
   }
+
+  // ── 4c. warp_batch_quote ────────────────────────────────────────
+  // Price N lanes in ONE tool call so a spreadsheet (or any list of lanes)
+  // renders as a single batch-quote card instead of N noisy per-lane calls.
+  // Server fans out in parallel (concurrency cap = 8). Warp single rate only.
+  const batchQuoteTool = server.tool(
+    "warp_batch_quote",
+    "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets). Use this WHENEVER the user gives you a spreadsheet, CSV, or list of multiple lanes to quote — do NOT call warp_*_quote in a loop. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with warp_book (\"book row 3\").",
+    {
+      lanes: z.array(
+        z.object({
+          mode: z.enum(["ltl", "ftl", "van", "box-truck"]).optional().describe("Mode for this lane. Defaults to 'ltl'."),
+          origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+          destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+          pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Pickup date YYYY-MM-DD (must not be in the past)"),
+          pallets: z.number().int().min(1).max(26).optional(),
+          weight_lbs_per_pallet: z.number().min(50).max(5000).optional(),
+          commodity: z.string().optional(),
+          length_in: z.number().positive().optional(),
+          width_in: z.number().positive().optional(),
+          height_in: z.number().positive().optional(),
+          freight_class: z.string().optional(),
+          stackable: z.boolean().optional(),
+          hazmat: z.boolean().optional(),
+          pickup_services: z.array(z.string()).optional(),
+          delivery_services: z.array(z.string()).optional(),
+        }),
+      ).min(1).max(50).describe("Array of lane requests (1-50). Each row maps to one quote."),
+    },
+    { title: "Batch Quote Lanes", readOnlyHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        const rawLanes = params.lanes as Array<Record<string, unknown>>;
+        // Refuse Canadian zips up front (no need to burn quote calls on them).
+        for (const lane of rawLanes) {
+          const o = String(lane.origin_zip ?? "");
+          const d = String(lane.destination_zip ?? "");
+          if (isCanadianPostal(o) || isCanadianPostal(d)) {
+            return { content: [{ type: "text", text: "Warp only services US domestic shipments. Remove non-US lanes and try again." }], isError: true };
+          }
+        }
+        const results = await client.batchQuote(rawLanes);
+        // Cache each priced lane's quote_id → amount so warp_book can log revenue.
+        for (const r of results) {
+          if (!r.ok || !r.result) continue;
+          const qid = r.result.warp_quote_id as string | undefined;
+          const qamt = r.result.warp_price as number | undefined;
+          if (qid && qamt) quoteAmountCache.set(qid, qamt);
+        }
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'quote',
+          tool_name: 'warp_batch_quote',
+          success: true,
+          duration_ms: Date.now() - start,
+        });
+        return batchQuoteToolResult(results);
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_batch_quote',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: errText(err) }], isError: true };
+      }
+    },
+  );
+  batchQuoteTool?.update({ _meta: BATCH_QUOTE_UI_META });
 
   // ── 5. warp_book ────────────────────────────────────────────────
 
@@ -490,6 +714,165 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       }
     },
   );
+
+  // ── 5b. warp_batch_book ─────────────────────────────────────────
+  // Book N already-quoted lanes in ONE tool call so a full spreadsheet of
+  // priced lanes books as a single progress card instead of N noisy per-row
+  // warp_book calls. Sequential under the hood (every call charges a real
+  // card; a 402 stops the run so the user fixes the card once instead of
+  // seeing the same error N times). Same auth + same per-quote session-cache
+  // guard as warp_book.
+  const batchBookTool = server.tool(
+    "warp_batch_book",
+    "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row). Use this after warp_batch_quote when the user says \"book all of them\" or \"book rows 1, 3, 5\" — do NOT call warp_book in a loop. Each row needs a quote_id (the same one warp_batch_quote returned for that row). Pickup/delivery default to the shared addresses at the top level so a single warehouse → many destinations only needs one address pair. Returns a progress card showing per-row Booked/Failed status with tracking numbers.",
+    {
+      bookings: z.array(
+        z.object({
+          quote_id: z.string().describe("Quote ID from a previous quote tool. Must be from THIS session — quote ids expire and rotate, so quote → book back-to-back."),
+          pickup: z.object({
+            zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+            contactName: z.string(), phone: z.string(), email: z.string(),
+            specialInstruction: z.string().optional(),
+          }).optional().describe("Per-row pickup. Omit to inherit from shared_pickup."),
+          delivery: z.object({
+            zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+            contactName: z.string(), phone: z.string(),
+            email: z.string().optional(),
+            specialInstruction: z.string().optional(),
+          }).optional().describe("Per-row delivery. Omit to inherit from shared_delivery."),
+          reference: z.string().optional().describe("Per-row reference (PO #, order #). Falls back to shared_reference."),
+          notes: z.string().optional().describe("Per-row special instructions. Falls back to shared_notes."),
+          accessorials: z.object({
+            pickup: z.array(z.string()).optional(),
+            delivery: z.array(z.string()).optional(),
+          }).optional().describe("Per-row accessorials. Falls back to shared_accessorials."),
+          pickup_window:   z.object({ from: z.string(), to: z.string() }).optional(),
+          delivery_window: z.object({ from: z.string(), to: z.string() }).optional(),
+        }),
+      ).min(1).max(25).describe("Array of bookings to confirm (1-25). Each is one freight shipment, one card charge."),
+      shared_pickup: z.object({
+        zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+        contactName: z.string(), phone: z.string(), email: z.string(),
+        specialInstruction: z.string().optional(),
+      }).optional().describe("Pickup address applied to every row that doesn't supply its own (FBA case: one warehouse → many destinations)."),
+      shared_delivery: z.object({
+        zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+        contactName: z.string(), phone: z.string(),
+        email: z.string().optional(),
+        specialInstruction: z.string().optional(),
+      }).optional().describe("Delivery address applied to every row that doesn't supply its own. Uncommon (usually each row goes somewhere different)."),
+      shared_reference: z.string().optional().describe("Reference applied to every row without its own."),
+      shared_notes: z.string().optional().describe("Notes applied to every row without their own."),
+      shared_accessorials: z.object({
+        pickup: z.array(z.string()).optional(),
+        delivery: z.array(z.string()).optional(),
+      }).optional(),
+      shared_pickup_window:   z.object({ from: z.string(), to: z.string() }).optional(),
+      shared_delivery_window: z.object({ from: z.string(), to: z.string() }).optional(),
+    },
+    { title: "Batch Book Shipments", destructiveHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        const apiKey = WARP_API_KEY();
+        if (!apiKey) {
+          return { content: [{ type: "text", text: "Booking requires your own Warp account with a card on file. Quoting is free; booking charges your card. Run `warp-agent signup` (new) or `warp-agent login` (existing)." }], isError: true };
+        }
+
+        const rows = params.bookings as Array<Record<string, unknown>>;
+
+        // Session-cache guard: every quote_id must have been seen this session.
+        // Fails fast for the whole batch (no money charged) when ids are stale.
+        const unknown = rows
+          .map((r, i) => ({ i, qid: String(r.quote_id ?? "") }))
+          .filter(({ qid }) => !quoteAmountCache.has(qid));
+        if (unknown.length > 0) {
+          const sample = unknown.slice(0, 3).map((u) => `row ${u.i + 1} (${u.qid})`).join(", ");
+          return { content: [{ type: "text", text: `Cannot book: ${unknown.length} of ${rows.length} quote ids are not from this session (${sample}${unknown.length > 3 ? ", …" : ""}). Quote ids rotate on every quote call. Re-run warp_batch_quote and book immediately after.` }], isError: true };
+        }
+
+        // Every row needs an effective pickup + delivery (per-row OR shared).
+        // Validate up front so we don't charge row 1 then crash on row 2.
+        const sharedPickup   = params.shared_pickup   as Record<string, unknown> | undefined;
+        const sharedDelivery = params.shared_delivery as Record<string, unknown> | undefined;
+        const missing = rows
+          .map((r, i) => ({ i, hasPickup: !!(r.pickup ?? sharedPickup), hasDelivery: !!(r.delivery ?? sharedDelivery) }))
+          .filter((m) => !m.hasPickup || !m.hasDelivery);
+        if (missing.length > 0) {
+          const which = missing.slice(0, 3).map((m) => `row ${m.i + 1} (${[!m.hasPickup && "pickup", !m.hasDelivery && "delivery"].filter(Boolean).join(" + ")})`).join(", ");
+          return { content: [{ type: "text", text: `Cannot book: ${missing.length} of ${rows.length} rows are missing addresses (${which}${missing.length > 3 ? ", …" : ""}). Either set shared_pickup / shared_delivery for the common warehouse, or fill in per-row pickup/delivery for those rows.` }], isError: true };
+        }
+
+        const shared = {
+          pickup:           sharedPickup,
+          delivery:         sharedDelivery,
+          notes:            params.shared_notes      as string | undefined,
+          reference:        params.shared_reference  as string | undefined,
+          accessorials:     params.shared_accessorials    as Record<string, unknown> | undefined,
+          pickup_window:    params.shared_pickup_window   as Record<string, unknown> | undefined,
+          delivery_window:  params.shared_delivery_window as Record<string, unknown> | undefined,
+        };
+
+        const results = await client.batchBook(rows, shared);
+
+        // Backfill amount_usd from the per-quote cache so the card can show
+        // "$3,420 charged" without depending on the gw response carrying it.
+        for (const r of results) {
+          if (r.ok && r.amount_usd == null) {
+            const cached = quoteAmountCache.get(r.quote_id);
+            if (cached) r.amount_usd = cached;
+          }
+        }
+
+        const succeeded = results.filter((r) => r.ok).length;
+        const totalAmount = results.reduce((s, r) => s + (r.ok ? (r.amount_usd ?? 0) : 0), 0);
+
+        // Emit one event per successful booking (analytics still tracks per-shipment
+        // revenue), plus one summary event for the batch itself.
+        for (const r of results) {
+          if (!r.ok) continue;
+          trackEvent({
+            product: 'warp-agent',
+            source: 'mcp',
+            event_type: 'book',
+            tool_name: 'warp_batch_book',
+            success: true,
+            tracking_number: r.tracking_number,
+            order_id: r.order_id,
+            quote_id: r.quote_id,
+            amount_usd: r.amount_usd,
+            origin_zip: r.pickup_zip,
+            dest_zip: r.delivery_zip,
+            customer_id: getCustomerEmail(),
+            customer_name: getCustomerEmail(),
+          });
+        }
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'list',
+          tool_name: 'warp_batch_book',
+          success: succeeded === results.length,
+          amount_usd: totalAmount,
+          duration_ms: Date.now() - start,
+        });
+
+        return batchBookToolResult(results);
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_batch_book',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: errText(err) }], isError: true };
+      }
+    },
+  );
+  batchBookTool?.update({ _meta: BATCH_BOOK_UI_META });
 
   // ── 6. warp_track ───────────────────────────────────────────────
 

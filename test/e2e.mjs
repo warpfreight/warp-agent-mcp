@@ -32,6 +32,8 @@ const RUN_MJS = join(__dirname, "..", "scripts", "run.mjs");
 // warp_multistop_quote + warp_multistop_book (sparse backend lane coverage).
 const EXPECTED_TOOLS = [
   "warp_analytics",
+  "warp_batch_book",
+  "warp_batch_quote",
   "warp_book",
   "warp_box_truck_quote",
   "warp_delete_load_template",
@@ -44,6 +46,7 @@ const EXPECTED_TOOLS = [
   "warp_load_templates",
   "warp_locations",
   "warp_login",
+  "warp_ltl_market_options",
   "warp_ltl_quote",
   "warp_payment_status",
   "warp_quote_history",

@@ -5,6 +5,8 @@ import { WarpClient } from "./client.js";
 import { registerTools } from "./tools.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, MCP_APP_MIME_TYPE, quoteCardTemplate, quoteCardMcpTemplate, } from "./widgets/quote-card.js";
 import { BOOKINGS_CARD_RESOURCE_URI, BOOKINGS_CARD_MCP_RESOURCE_URI, bookingsCardTemplate, bookingsCardMcpTemplate, } from "./widgets/bookings-card.js";
+import { BATCH_QUOTE_CARD_RESOURCE_URI, BATCH_QUOTE_CARD_MCP_RESOURCE_URI, batchQuoteCardTemplate, batchQuoteCardMcpTemplate, } from "./widgets/batch-quote-card.js";
+import { BATCH_BOOK_CARD_RESOURCE_URI, BATCH_BOOK_CARD_MCP_RESOURCE_URI, batchBookCardTemplate, batchBookCardMcpTemplate, } from "./widgets/batch-book-card.js";
 // Node 20+ is required for native fetch and the MCP SDK. npx -y ignores the
 // "engines" field, so a user on an older Node crashes with a cryptic
 // "fetch is not defined". This guard converts that into an actionable message.
@@ -135,6 +137,35 @@ server.registerResource("warp-bookings-card-mcp", BOOKINGS_CARD_MCP_RESOURCE_URI
     mimeType: MCP_APP_MIME_TYPE,
 }, async () => ({
     contents: [{ uri: BOOKINGS_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: bookingsCardMcpTemplate() }],
+}));
+// Inline batch-quote card — single card showing every priced lane after a
+// warp_batch_quote call (one tool call instead of N noisy per-lane calls).
+server.registerResource("warp-batch-quote-card", BATCH_QUOTE_CARD_RESOURCE_URI, {
+    description: "Inline batch-quote card shown after warp_batch_quote. Renders N priced lanes in a single scrollable card; click a row to expand its quote_id + transit + delivery for booking.",
+    mimeType: "text/html",
+}, async () => ({
+    contents: [{ uri: BATCH_QUOTE_CARD_RESOURCE_URI, mimeType: "text/html", text: batchQuoteCardTemplate() }],
+}));
+server.registerResource("warp-batch-quote-card-mcp", BATCH_QUOTE_CARD_MCP_RESOURCE_URI, {
+    description: "Inline batch-quote card (MCP Apps) shown after warp_batch_quote. Single card, N rows, one price per lane.",
+    mimeType: MCP_APP_MIME_TYPE,
+}, async () => ({
+    contents: [{ uri: BATCH_QUOTE_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: batchQuoteCardMcpTemplate() }],
+}));
+// Inline batch-book progress card — single card showing per-row booking
+// status after a warp_batch_book call. Replaces N noisy per-row warp_book
+// calls with one progress card (Booked/Failed pills, tracking links).
+server.registerResource("warp-batch-book-card", BATCH_BOOK_CARD_RESOURCE_URI, {
+    description: "Inline batch-book progress card shown after warp_batch_book. Renders N bookings in a single card with per-row Booked/Failed pills, tracking numbers, and click-to-expand detail (tracking_url, order_id, amount charged).",
+    mimeType: "text/html",
+}, async () => ({
+    contents: [{ uri: BATCH_BOOK_CARD_RESOURCE_URI, mimeType: "text/html", text: batchBookCardTemplate() }],
+}));
+server.registerResource("warp-batch-book-card-mcp", BATCH_BOOK_CARD_MCP_RESOURCE_URI, {
+    description: "Inline batch-book progress card (MCP Apps) shown after warp_batch_book. Single card, N rows, one booking status per row.",
+    mimeType: MCP_APP_MIME_TYPE,
+}, async () => ({
+    contents: [{ uri: BATCH_BOOK_CARD_MCP_RESOURCE_URI, mimeType: MCP_APP_MIME_TYPE, text: batchBookCardMcpTemplate() }],
 }));
 const transport = new StdioServerTransport();
 await server.connect(transport);

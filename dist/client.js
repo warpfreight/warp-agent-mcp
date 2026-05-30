@@ -105,10 +105,10 @@ export class WarpClient {
             return "https://www.wearewarp.com";
         }
     }
-    async _selfServeQuote(mode, params) {
-        const key = this.getApiKey();
-        const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
-        // Forward all recognised params; the route ignores unknowns
+    // Build the canonical quote-route body from raw tool params. Extracted so
+    // both _selfServeQuote and the public ltlMarketOptions wrapper produce
+    // identical bodies for the same input.
+    buildQuoteBody(params) {
         const body = {};
         for (const k of [
             "origin_zip", "destination_zip", "pickup_date",
@@ -120,16 +120,17 @@ export class WarpClient {
             if (params[k] !== undefined)
                 body[k] = params[k];
         }
-        // The quote route reads accessorials as body.accessorials {pickup, delivery}
-        // (same shape as /book), not the flat pickup_services/delivery_services keys.
-        // Build it so accessorials reach + are stored on the quote — otherwise gw
-        // rejects a later booking with "BookingData and quoteInfo must be the same
-        // pickupServices."
         const ps = params.pickup_services;
         const ds = params.delivery_services;
         if ((ps && ps.length) || (ds && ds.length)) {
             body.accessorials = { pickup: ps ?? [], delivery: ds ?? [] };
         }
+        return body;
+    }
+    async _selfServeQuote(mode, params) {
+        const key = this.getApiKey();
+        const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
+        const body = this.buildQuoteBody(params);
         const headers = { "Content-Type": "application/json" };
         if (key)
             headers["Authorization"] = `Bearer ${key}`;
@@ -157,23 +158,19 @@ export class WarpClient {
         }
         const originZip = String(params.origin_zip ?? "");
         const destZip = String(params.destination_zip ?? "");
-        // For LTL, also pull the multi-carrier spread (~20 carriers, ~15s) so the
-        // quote card can render the full comparison. Non-fatal: on failure/timeout
-        // the card falls back to the single Warp option. Other modes stay single-rate.
-        let marketOptions = [];
-        if (mode === "ltl" && hasQuote) {
-            try {
-                marketOptions = await this._ltlMarketOptions(body, key);
-            }
-            catch { /* non-fatal */ }
-        }
+        // NOTE: market_options (the multi-carrier spread) used to be awaited inline
+        // here for LTL — that added ~15s to every LTL quote. Now it's a SEPARATE
+        // tool (warp_ltl_market_options) the agent calls as a follow-up, so the
+        // Warp rate appears in ~1-2s and the comparison fills in after. The widget
+        // uses `loading_market: true` to render skeleton placeholders meanwhile.
         return {
             // Standard MCP quote fields (tools.ts reads these for quoteAmountCache)
             warp_quote_id: quoteId,
             warp_price: priceUsd,
             warp_transit_days: transitDays,
             options: [],
-            market_options: marketOptions,
+            market_options: [],
+            loading_market: mode === "ltl" && hasQuote,
             // Pass self-serve response fields through for warp_book and display
             ...(hasQuote ? {
                 quote_id: quoteId,
@@ -194,6 +191,12 @@ export class WarpClient {
                 ? `Warp ${mode.toUpperCase()} quote_id: ${quoteId} — use this id with warp_book to book`
                 : `No Warp coverage on this lane (${originZip} → ${destZip}). ${data.error ?? ""}`,
         };
+    }
+    // Public wrapper used by the warp_ltl_market_options tool. Takes raw tool
+    // params, normalises to the canonical quote body, and fetches the spread.
+    async ltlMarketOptions(params) {
+        const key = this.getApiKey();
+        return this._ltlMarketOptions(this.buildQuoteBody(params), key);
     }
     // Multi-carrier LTL spread for the comparison card. Keyless-capable (server
     // falls back to the house quote account). Slow (~15s) — it polls every carrier.
@@ -227,6 +230,112 @@ export class WarpClient {
     }
     async ltlQuote(params, _originZip, _destZip) {
         return this._selfServeQuote("ltl", params);
+    }
+    // Batch quote N lanes in parallel — used by warp_batch_quote. Each lane is
+    // its own quote-route call (Warp single rate only; no market_options on the
+    // batch path). Concurrency is capped so an enormous spreadsheet doesn't
+    // hammer the API or saturate node's socket pool.
+    async batchQuote(lanes, concurrency = 8) {
+        const results = new Array(lanes.length);
+        let next = 0;
+        const VALID_MODES = new Set(["ltl", "ftl", "van", "box-truck"]);
+        const worker = async () => {
+            while (true) {
+                const i = next++;
+                if (i >= lanes.length)
+                    return;
+                const lane = lanes[i];
+                const rawMode = typeof lane.mode === "string" ? lane.mode : "ltl";
+                const mode = (VALID_MODES.has(rawMode) ? rawMode : "ltl");
+                // Strip mode from the params we send through (the route doesn't expect it).
+                const params = { ...lane };
+                delete params.mode;
+                try {
+                    const result = (await this._selfServeQuote(mode, params));
+                    results[i] = { row: i + 1, ok: true, mode, input: lane, result };
+                }
+                catch (err) {
+                    results[i] = {
+                        row: i + 1, ok: false, mode, input: lane,
+                        error: err instanceof Error ? err.message : String(err),
+                    };
+                }
+            }
+        };
+        const n = Math.max(1, Math.min(concurrency, lanes.length));
+        await Promise.all(Array.from({ length: n }, () => worker()));
+        return results;
+    }
+    // Batch book N already-quoted lanes — used by warp_batch_book. Sequential
+    // (concurrency = 1) on purpose: every call charges a real card, so a stale
+    // quote or a 402 (no payment method) should abort the rest, not race ahead.
+    // Each row may carry its own pickup/delivery, or inherit from the shared
+    // defaults the caller passed (FBA case: one warehouse → many destinations).
+    // Returns the full per-row outcome (tracking_number / order_id on success,
+    // error string on failure) so the tool can render a single progress card.
+    async batchBook(rows, shared) {
+        const results = [];
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const quoteId = String(row.quote_id ?? "");
+            // Merge per-row over shared. Per-row wins when present.
+            const pickup = (row.pickup ?? shared?.pickup);
+            const delivery = (row.delivery ?? shared?.delivery);
+            const body = {
+                quote_id: quoteId,
+                ...(pickup ? { pickup } : {}),
+                ...(delivery ? { delivery } : {}),
+                ...(row.notes ?? shared?.notes ? { notes: row.notes ?? shared?.notes } : {}),
+                ...(row.reference ?? shared?.reference ? { reference: row.reference ?? shared?.reference } : {}),
+                ...(row.accessorials ?? shared?.accessorials ? { accessorials: row.accessorials ?? shared?.accessorials } : {}),
+                ...(row.pickup_window ?? shared?.pickup_window ? { pickup_window: row.pickup_window ?? shared?.pickup_window } : {}),
+                ...(row.delivery_window ?? shared?.delivery_window ? { delivery_window: row.delivery_window ?? shared?.delivery_window } : {}),
+            };
+            const pickupZip = pickup && typeof pickup.zipCode === "string" ? pickup.zipCode : undefined;
+            const deliveryZip = delivery && typeof delivery.zipCode === "string" ? delivery.zipCode : undefined;
+            try {
+                const data = await this.book(body);
+                results.push({
+                    row: i + 1,
+                    ok: true,
+                    quote_id: quoteId,
+                    pickup_zip: pickupZip,
+                    delivery_zip: deliveryZip,
+                    tracking_number: typeof data.trackingNumber === "string" ? data.trackingNumber : undefined,
+                    order_id: typeof data.orderId === "string" ? data.orderId : undefined,
+                    booking_url: typeof data.booking_url === "string" ? data.booking_url : undefined,
+                    amount_usd: typeof data.amount_usd === "number" ? data.amount_usd : undefined,
+                    raw: data,
+                });
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                results.push({
+                    row: i + 1,
+                    ok: false,
+                    quote_id: quoteId,
+                    pickup_zip: pickupZip,
+                    delivery_zip: deliveryZip,
+                    error: msg,
+                });
+                // 402 / no-payment errors are not row-specific — they'll fail every
+                // remaining row too. Bail out and surface them all as "skipped — see
+                // row N error" so the user fixes the card once instead of seeing N
+                // identical failures.
+                if (/no payment|payment method|card on file|402/i.test(msg)) {
+                    for (let j = i + 1; j < rows.length; j++) {
+                        results.push({
+                            row: j + 1,
+                            ok: false,
+                            quote_id: String(rows[j].quote_id ?? ""),
+                            error: `Skipped after row ${i + 1} failure (no payment method on file).`,
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+        return results;
     }
     // ── Self-serve account helpers (saved locations + load templates) ──
     // Hit the warp-site self-serve routes directly with Bearer auth, like quote/book
