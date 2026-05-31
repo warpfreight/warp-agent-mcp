@@ -413,6 +413,32 @@ export function registerTools(server, client, getApiKey) {
             const qamt = warpRaw?.warp_price;
             if (qid && qamt)
                 quoteAmountCache.set(qid, qamt);
+            // Pin the spread's Warp row to the headline instant quote.
+            // The fast /ltl/quote and the carrier spread price Warp through two
+            // different upstreams, so the spread's Warp row can come back with a
+            // different quote_id + price than the Warp rate the user just saw above.
+            // Booking that row would then charge a price that doesn't match the
+            // headline. We point the spread's Warp row at the SAME quote_id + price
+            // as the headline quote, so "book the Warp option" always books exactly
+            // the Warp price shown — one Warp price everywhere. Other carriers keep
+            // their own per-row quote_id + price (they're genuinely separate rates).
+            const opts = Array.isArray(marketOptions)
+                ? marketOptions
+                : [];
+            for (const row of opts) {
+                if (row && row.is_warp === true && qid) {
+                    row.quote_id = qid;
+                    if (typeof qamt === "number")
+                        row.price_usd = qamt;
+                }
+                // Cache every bookable row's amount so warp_book's session guard
+                // passes (and revenue logs) when the user books a specific carrier,
+                // not just the headline Warp quote.
+                const rid = typeof row?.quote_id === "string" ? row.quote_id : undefined;
+                const rprice = typeof row?.price_usd === "number" ? row.price_usd : undefined;
+                if (rid && rprice)
+                    quoteAmountCache.set(rid, rprice);
+            }
             // Combine for the card: Warp featured + filled-in spread, loading flag cleared.
             const combined = {
                 ...warpRaw,
@@ -632,9 +658,23 @@ export function registerTools(server, client, getApiKey) {
             // tracking key; the P- order_number is shown for reconciliation only.
             const bookShipmentNo = (typeof data.shipment_number === "string" && data.shipment_number) ||
                 (typeof data.tracking_number === "string" && data.tracking_number) || "";
-            const enriched = bookShipmentNo
-                ? { ...data, tracking_url: trackingUrl(bookShipmentNo) }
-                : data;
+            // Surface the exact price charged so the agent states it plainly and the
+            // user can match it to their dashboard. /api/v1/book charges the stored
+            // price of the quote_id booked (no re-quote), so this IS the final
+            // amount — same number that appears on the shipment.
+            const bookedPrice = (typeof data.price_usd === "number" && data.price_usd) ||
+                (typeof data.amount_usd === "number" && data.amount_usd) ||
+                amount_usd;
+            const enriched = {
+                ...data,
+                ...(bookShipmentNo ? { tracking_url: trackingUrl(bookShipmentNo) } : {}),
+                ...(typeof bookedPrice === "number"
+                    ? {
+                        booked_price_usd: bookedPrice,
+                        price_note: "This is the final amount charged for the option you booked — it matches your shipment on the Warp dashboard.",
+                    }
+                    : {}),
+            };
             return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
         }
         catch (err) {
