@@ -2,8 +2,8 @@ import { MCP_APP_MIME_TYPE } from "./quote-card.js";
 export declare const BOOKINGS_CARD_RESOURCE_URI = "ui://warp/bookings-card";
 export declare const BOOKINGS_CARD_MCP_RESOURCE_URI = "ui://warp/bookings-card.mcp";
 export declare const TRACKING_BASE_URL = "https://tracking.wearewarp.com";
-/** Build the public tracking URL for a shipment from its order number (P-…). */
-export declare function trackingUrl(orderNumber: string | undefined | null): string;
+/** Build the public tracking URL for a shipment from its S- shipment number. */
+export declare function trackingUrl(shipmentNumber: string | undefined | null): string;
 export interface ShipmentParty {
     name: string;
     street: string;

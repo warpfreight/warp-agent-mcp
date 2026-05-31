@@ -94,8 +94,10 @@ function batchQuoteToolResult(rawLanes) {
 // wrong host). Non-UI clients fall back to that enriched JSON.
 function bookingsToolResult(data) {
     const widget = toBookingsWidgetData(data);
-    // Enrich the raw response: attach tracking_url (https://tracking.wearewarp.com/<orderNumber>)
+    // Enrich the raw response: attach tracking_url (https://tracking.wearewarp.com/<shipmentNumber>)
     // to each shipment in the text output, without dropping any original fields.
+    // Keyed on the S- shipment number (NOT the P- order number); fall back to
+    // trackingNumber.
     let textPayload = data;
     const rows = Array.isArray(data.data)
         ? (data.data)
@@ -103,7 +105,8 @@ function bookingsToolResult(data) {
     if (rows) {
         const enriched = rows.map((s) => ({
             ...s,
-            tracking_url: trackingUrl(typeof s.orderNumber === "string" ? s.orderNumber : undefined),
+            tracking_url: trackingUrl(typeof s.shipmentNumber === "string" ? s.shipmentNumber
+                : typeof s.trackingNumber === "string" ? s.trackingNumber : undefined),
         }));
         textPayload = { ...data, data: enriched };
     }
@@ -623,7 +626,16 @@ export function registerTools(server, client, getApiKey) {
                 customer_name: getCustomerEmail(),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+            // Enrich the book response with the canonical public tracking URL so the
+            // model surfaces the real deep link (https://tracking.wearewarp.com/S-…)
+            // instead of the generic dashboard. The S- shipment number is the
+            // tracking key; the P- order_number is shown for reconciliation only.
+            const bookShipmentNo = (typeof data.shipment_number === "string" && data.shipment_number) ||
+                (typeof data.tracking_number === "string" && data.tracking_number) || "";
+            const enriched = bookShipmentNo
+                ? { ...data, tracking_url: trackingUrl(bookShipmentNo) }
+                : data;
+            return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
         }
         catch (err) {
             trackEvent({
@@ -799,13 +811,15 @@ export function registerTools(server, client, getApiKey) {
                 duration_ms: Date.now() - start,
             });
             // Enrich with the canonical public tracking URL so the model links to the
-            // real tracking page (https://tracking.wearewarp.com/<orderNumber>) instead
-            // of fabricating one. The gw tracking record carries orderNumber (P-…).
+            // real tracking page (https://tracking.wearewarp.com/<shipmentNumber>)
+            // instead of fabricating one. The tracking page keys on the S- shipment
+            // number (NOT the P- order number); fall back to trackingNumber.
             const records = Array.isArray(data) ? data : null;
             const out = records
                 ? records.map((r) => ({
                     ...r,
-                    tracking_url: trackingUrl(typeof r.orderNumber === "string" ? r.orderNumber : undefined),
+                    tracking_url: trackingUrl(typeof r.shipmentNumber === "string" ? r.shipmentNumber
+                        : typeof r.trackingNumber === "string" ? r.trackingNumber : undefined),
                 }))
                 : data;
             return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };

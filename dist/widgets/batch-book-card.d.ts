@@ -7,6 +7,7 @@ export interface BatchBookRow {
     quote_id: string;
     pickup_zip: string;
     delivery_zip: string;
+    shipment_number: string;
     tracking_number: string;
     order_id: string;
     tracking_url: string;
@@ -31,6 +32,7 @@ export declare function toBatchBookWidgetData(raw: Array<{
     quote_id: string;
     pickup_zip?: string;
     delivery_zip?: string;
+    shipment_number?: string;
     tracking_number?: string;
     order_id?: string;
     booking_url?: string;

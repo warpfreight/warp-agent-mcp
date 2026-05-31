@@ -22,6 +22,7 @@ export interface BatchBookRow {
   quote_id: string;
   pickup_zip: string;
   delivery_zip: string;
+  shipment_number: string;
   tracking_number: string;
   order_id: string;
   tracking_url: string;
@@ -43,12 +44,12 @@ function str(v: unknown, fb = ""): string { return typeof v === "string" ? v : v
 function num(v: unknown, fb = 0): number { return typeof v === "number" && Number.isFinite(v) ? v : fb; }
 
 // Canonical public tracking URL — matches the bookings-card helper so the
-// model never has to fabricate links. orderNumber starts with "P-…" for booked
-// shipments; if it's missing we degrade to an empty string and the card hides
-// the link.
-function trackingUrl(orderNumber: string): string {
-  if (!orderNumber) return "";
-  return `https://tracking.wearewarp.com/${encodeURIComponent(orderNumber)}`;
+// model never has to fabricate links. The deep link keys on the S- SHIPMENT
+// number (tracking.wearewarp.com/S-…), NOT the P- order number; if it's
+// missing we degrade to an empty string and the card hides the link.
+function trackingUrl(shipmentNumber: string): string {
+  if (!shipmentNumber) return "";
+  return `https://tracking.wearewarp.com/${encodeURIComponent(shipmentNumber)}`;
 }
 
 /**
@@ -58,27 +59,30 @@ export function toBatchBookWidgetData(
   raw: Array<{
     row: number; ok: boolean; quote_id: string;
     pickup_zip?: string; delivery_zip?: string;
-    tracking_number?: string; order_id?: string;
+    shipment_number?: string; tracking_number?: string; order_id?: string;
     booking_url?: string; amount_usd?: number;
     raw?: Record<string, unknown>; error?: string;
   }>,
 ): BatchBookWidgetData | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const rows: BatchBookRow[] = raw.map((r) => {
-    // The gw response (carried through in r.raw) sometimes returns orderNumber
-    // alongside trackingNumber/orderId — prefer it for the tracking URL because
-    // /tracking/<P-…> is the public-facing path.
+    // Tracking deep-links key on the S- SHIPMENT number
+    // (tracking.wearewarp.com/S-…), not the P- order number. Prefer the
+    // explicit shipment_number; fall back to tracking_number (also the S- in
+    // booking responses), then the raw gw fields carried in r.raw.
     const rawData = r.raw && typeof r.raw === "object" ? r.raw as Record<string, unknown> : {};
-    const orderNumber = str(rawData.orderNumber) || str(r.order_id);
+    const shipmentNumber = str(r.shipment_number) || str(r.tracking_number)
+      || str(rawData.shipment_number) || str(rawData.shipmentNumber) || str(rawData.tracking_number);
     return {
       row: r.row,
       ok: r.ok === true,
       quote_id: str(r.quote_id),
       pickup_zip: str(r.pickup_zip),
       delivery_zip: str(r.delivery_zip),
-      tracking_number: str(r.tracking_number),
+      shipment_number: shipmentNumber,
+      tracking_number: str(r.tracking_number) || shipmentNumber,
       order_id: str(r.order_id),
-      tracking_url: trackingUrl(orderNumber),
+      tracking_url: trackingUrl(shipmentNumber),
       booking_url: str(r.booking_url),
       amount_usd: num(r.amount_usd),
       error: str(r.error),

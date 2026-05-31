@@ -7,14 +7,14 @@
     "url": "https://github.com/warpfreight/warp-agent-mcp",
     "source": "github"
   },
-  "version": "0.13.0",
+  "version": "0.13.1",
   "websiteUrl": "https://wearewarp.com",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "warp-agent-mcp",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "transport": {
         "type": "stdio"
       },

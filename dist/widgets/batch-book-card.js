@@ -17,13 +17,13 @@ export const BATCH_BOOK_CARD_MCP_RESOURCE_URI = "ui://warp/batch-book-card.mcp";
 function str(v, fb = "") { return typeof v === "string" ? v : v == null ? fb : String(v); }
 function num(v, fb = 0) { return typeof v === "number" && Number.isFinite(v) ? v : fb; }
 // Canonical public tracking URL — matches the bookings-card helper so the
-// model never has to fabricate links. orderNumber starts with "P-…" for booked
-// shipments; if it's missing we degrade to an empty string and the card hides
-// the link.
-function trackingUrl(orderNumber) {
-    if (!orderNumber)
+// model never has to fabricate links. The deep link keys on the S- SHIPMENT
+// number (tracking.wearewarp.com/S-…), NOT the P- order number; if it's
+// missing we degrade to an empty string and the card hides the link.
+function trackingUrl(shipmentNumber) {
+    if (!shipmentNumber)
         return "";
-    return `https://tracking.wearewarp.com/${encodeURIComponent(orderNumber)}`;
+    return `https://tracking.wearewarp.com/${encodeURIComponent(shipmentNumber)}`;
 }
 /**
  * Map the client.batchBook() result array into the widget shape.
@@ -32,20 +32,23 @@ export function toBatchBookWidgetData(raw) {
     if (!Array.isArray(raw) || raw.length === 0)
         return null;
     const rows = raw.map((r) => {
-        // The gw response (carried through in r.raw) sometimes returns orderNumber
-        // alongside trackingNumber/orderId — prefer it for the tracking URL because
-        // /tracking/<P-…> is the public-facing path.
+        // Tracking deep-links key on the S- SHIPMENT number
+        // (tracking.wearewarp.com/S-…), not the P- order number. Prefer the
+        // explicit shipment_number; fall back to tracking_number (also the S- in
+        // booking responses), then the raw gw fields carried in r.raw.
         const rawData = r.raw && typeof r.raw === "object" ? r.raw : {};
-        const orderNumber = str(rawData.orderNumber) || str(r.order_id);
+        const shipmentNumber = str(r.shipment_number) || str(r.tracking_number)
+            || str(rawData.shipment_number) || str(rawData.shipmentNumber) || str(rawData.tracking_number);
         return {
             row: r.row,
             ok: r.ok === true,
             quote_id: str(r.quote_id),
             pickup_zip: str(r.pickup_zip),
             delivery_zip: str(r.delivery_zip),
-            tracking_number: str(r.tracking_number),
+            shipment_number: shipmentNumber,
+            tracking_number: str(r.tracking_number) || shipmentNumber,
             order_id: str(r.order_id),
-            tracking_url: trackingUrl(orderNumber),
+            tracking_url: trackingUrl(shipmentNumber),
             booking_url: str(r.booking_url),
             amount_usd: num(r.amount_usd),
             error: str(r.error),

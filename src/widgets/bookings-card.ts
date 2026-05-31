@@ -8,9 +8,10 @@
 // tracking page. So the agent feels like a TMS the user can click into.
 //
 // Tracking URL is the canonical public one used by the Warp customer app:
-//   https://tracking.wearewarp.com/<orderNumber>   (orderNumber = P-XXXXX-XXXX)
-// NOT customer.wearewarp.com/tracking/<shipmentNumber> (that host 404s, and the
-// shipment S-number is the wrong key — the tracking page keys on the P- order).
+//   https://tracking.wearewarp.com/<shipmentNumber>   (shipmentNumber = S-XXXXX-XXXX)
+// The S- shipment number is the key the public tracking page resolves (confirmed
+// against the live page search box). The P- order number is shown for
+// reconciliation only — it is NOT the tracking key.
 //
 // Same dual-platform design as quote-card.ts — ONE painter
 // (window.__warpRenderBookings), two delivery paths:
@@ -28,9 +29,9 @@ export const BOOKINGS_CARD_MCP_RESOURCE_URI = "ui://warp/bookings-card.mcp";
 // Canonical public tracking host (Warp customer app: src/lib/tracking-resolver.ts).
 export const TRACKING_BASE_URL = "https://tracking.wearewarp.com";
 
-/** Build the public tracking URL for a shipment from its order number (P-…). */
-export function trackingUrl(orderNumber: string | undefined | null): string {
-  const code = (orderNumber ?? "").trim();
+/** Build the public tracking URL for a shipment from its S- shipment number. */
+export function trackingUrl(shipmentNumber: string | undefined | null): string {
+  const code = (shipmentNumber ?? "").trim();
   return code ? `${TRACKING_BASE_URL}/${encodeURIComponent(code)}` : "";
 }
 
@@ -159,12 +160,13 @@ export function toBookingsWidgetData(response: unknown): BookingsWidgetData | nu
     const pickup = mapParty(s.pickupInfo);
     const delivery = mapParty(s.deliveryInfo);
     const orderNumber = str(s.orderNumber);
+    const shipmentNumber = str(s.shipmentNumber) || str(s.trackingNumber);
     const statusInfo = rec(s.statusInfo);
     return {
-      shipment_number: str(s.shipmentNumber) || str(s.trackingNumber),
+      shipment_number: shipmentNumber,
       order_number: orderNumber,
       tracking_number: str(s.trackingNumber) || str(s.shipmentNumber),
-      tracking_url: trackingUrl(orderNumber),
+      tracking_url: trackingUrl(shipmentNumber),
       mode: str(s.shipmentType, "LTL"),
       status: str(s.status) || str(statusInfo.status),
       created: str(s.createDate),

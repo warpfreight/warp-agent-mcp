@@ -301,9 +301,19 @@ export class WarpClient {
                     quote_id: quoteId,
                     pickup_zip: pickupZip,
                     delivery_zip: deliveryZip,
-                    tracking_number: typeof data.trackingNumber === "string" ? data.trackingNumber : undefined,
-                    order_id: typeof data.orderId === "string" ? data.orderId : undefined,
-                    booking_url: typeof data.booking_url === "string" ? data.booking_url : undefined,
+                    // /api/v1/book returns snake_case. The S- shipment number is the
+                    // public tracking key (tracking.wearewarp.com/S-…); order_number is
+                    // the P- order ref shown for reconciliation, not the tracking key.
+                    // (The previous camelCase reads — data.trackingNumber / data.orderId —
+                    // never matched the snake_case response, so every row came back blank.)
+                    shipment_number: typeof data.shipment_number === "string" ? data.shipment_number
+                        : typeof data.tracking_number === "string" ? data.tracking_number : undefined,
+                    tracking_number: typeof data.tracking_number === "string" ? data.tracking_number
+                        : typeof data.shipment_number === "string" ? data.shipment_number : undefined,
+                    order_id: typeof data.order_number === "string" ? data.order_number
+                        : typeof data.order_id === "string" ? data.order_id : undefined,
+                    booking_url: typeof data.booking_url === "string" ? data.booking_url
+                        : typeof data.tracking_dashboard === "string" ? data.tracking_dashboard : undefined,
                     amount_usd: typeof data.amount_usd === "number" ? data.amount_usd : undefined,
                     raw: data,
                 });
