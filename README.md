@@ -10,7 +10,7 @@ agent.
 
 ## What it does
 
-16 tools that let an AI agent talk to your Warp account:
+23 tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
@@ -18,12 +18,19 @@ agent.
 | `warp_box_truck_quote` | Quote a 1–12 pallet box truck shipment |
 | `warp_ftl_quote` | Quote a full truckload (53' dry van) |
 | `warp_ltl_quote` | Quote LTL — Warp's flagship freight product |
+| `warp_ltl_market_options` | Multi-carrier LTL comparison - 30+ carriers ranked by price |
+| `warp_batch_quote` | Quote many lanes in one call (a whole spreadsheet / CSV) |
 | `warp_book` | Book any quote by id, with pickup + delivery addresses |
+| `warp_batch_book` | Book many already-quoted lanes in one call |
 | `warp_track` | Track a shipment by id or order id |
 | `warp_events` | Full tracking event timeline for a shipment |
 | `warp_lane_history` | Past shipments on your lanes |
 | `warp_list_bookings` | List recent bookings |
 | `warp_quote_history` | List recent quotes across all sessions |
+| `warp_locations` | List your saved pickup/delivery locations |
+| `warp_load_templates` | List your saved reusable load configurations |
+| `warp_save_load_template` | Save a reusable load configuration (weight + dims + class) |
+| `warp_delete_load_template` | Delete a saved load template by id |
 | `warp_get_invoice` | Invoice for a delivered shipment |
 | `warp_get_documents` | Shipment documents (BOL, POD, customs) |
 | `warp_login` | Log in from inside the MCP, no portal visit needed |
