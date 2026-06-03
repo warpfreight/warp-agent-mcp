@@ -1,0 +1,20 @@
+# Smithery configuration — https://smithery.ai/docs
+# Hosts the published npm package (stdio) on Smithery's infra. Each user supplies
+# their own Warp API key at connect time (keyless quotes work without one;
+# booking / tracking / invoices need it). Get a key at https://www.wearewarp.com.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      warpApiKey:
+        type: string
+        title: Warp API Key
+        description: "Your Warp API key (wak_live_...). Optional — keyless quotes work without it; booking and tracking require it."
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'warp-agent-mcp@latest'],
+      env: config.warpApiKey ? { WARP_API_KEY: config.warpApiKey } : {}
+    })
