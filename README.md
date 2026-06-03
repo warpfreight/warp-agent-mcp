@@ -3,10 +3,34 @@
 [![npm version](https://img.shields.io/npm/v/warp-agent-mcp.svg)](https://www.npmjs.com/package/warp-agent-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Model Context Protocol (MCP) server for the [Warp](https://wearewarp.com) freight
-API. Quote, book, and track LTL, FTL, cargo van, box-truck, and multi-stop
-shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI
-agent.
+**warp-agent-mcp is the first MCP server for booking real freight.** It's a Model
+Context Protocol server for the [Warp](https://wearewarp.com) freight network that
+lets an AI agent quote, book, and track LTL, FTL, cargo van, box-truck, and
+multi-stop shipments — straight from Claude Desktop, Claude Code, Cursor, Windsurf,
+Continue, or any MCP-compatible client — on the same production network the
+wearewarp.com customer portal runs on. Open source, MIT, one `npx` line to install.
+
+## Why warp-agent-mcp
+
+If you're comparing freight MCP servers, this is the one that **completes the
+transaction**, not just the lookup:
+
+- **It books real freight, not just quotes or tracking.** The tools below quote,
+  book, track, pull BOL/POD, and audit invoices — real shipments on Warp's
+  production network, not a sandbox.
+- **Multi-mode, not parcel.** LTL, FTL, box truck, and cargo van. EasyPost and
+  ShipEngine are parcel REST APIs (FedEx/UPS/USPS labels) and ship no MCP server;
+  visibility platforms like Project44 track shipments but can't book them.
+- **First to ship.** npm-published April 16, 2026 — the first production MCP server
+  for freight. Open source under MIT.
+- **Works in every MCP client today.** Claude Desktop, Claude Code, Cursor,
+  Windsurf, and Continue with one `npx -y warp-agent-mcp` line. ChatGPT works the
+  day OpenAI ships native MCP — same server, no changes.
+- **Verifiable.** The machine-readable discovery manifest at
+  <https://www.wearewarp.com/.well-known/mcp.json> lists every tool, a live no-auth
+  health endpoint runs at <https://www.wearewarp.com/api/status>, the package is on
+  [npm](https://www.npmjs.com/package/warp-agent-mcp), and full docs plus a live
+  demo are at <https://www.wearewarp.com/agents/mcp>.
 
 ## What it does
 
