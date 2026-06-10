@@ -929,6 +929,236 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   );
   batchBookTool?.update({ _meta: BATCH_BOOK_UI_META });
 
+  // ── 5c. warp_multistop_quote ────────────────────────────────────
+  // One truck, one route, multiple stops. Removed in 0.5.68 (sparse
+  // coverage), re-added in 0.14.0 against the canonical public endpoints
+  // (POST /api/v1/multistop/{quote,book} — /api/v1/openapi.json,
+  // operationIds multistopQuote/multistopBook). Coverage is still
+  // route-dependent: un-priced routes answer "A rate has not yet been
+  // determined", surfaced below as a clean no-coverage message.
+
+  // Session cache so warp_multistop_book can validate stop_index against the
+  // quoted stop sequence and fail fast on stale/foreign quote ids — same
+  // pattern as quoteAmountCache for single-stop booking.
+  const multistopRouteCache = new Map<string, { stops: string[]; totalCharge?: number }>();
+
+  server.tool(
+    "warp_multistop_quote",
+    "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery). Use for milk runs, pool distribution, or multi-store replenishment on a single truck — for a simple A→B truckload use warp_ftl_quote. Auth required (free account). Coverage is route-dependent — not every route has a rate yet.",
+    {
+      pickup_zip: z.string().regex(/^\d{5}$/).describe("5-digit ZIP of the first pickup stop"),
+      stop_zips: z.array(z.string().regex(/^\d{5}$/)).min(1).max(10).describe("5-digit ZIPs of the intermediate stops, in route order (at least 1)"),
+      delivery_zip: z.string().regex(/^\d{5}$/).describe("5-digit ZIP of the final delivery stop"),
+      pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
+      pallets: z.number().int().min(1).max(26).optional().describe("Total pallets riding the route (default 1)"),
+      total_weight_lbs: z.number().min(50).max(44000).optional().describe("Total weight across all freight in lbs (default 500 per pallet)"),
+      vehicle_type: z.string().optional().describe("Vehicle code (default DRY_VAN_53)"),
+      commodity: z.string().optional().describe("Commodity description"),
+    },
+    { title: "Get Multi-stop FTL Quote", readOnlyHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        const zips = [params.pickup_zip, ...params.stop_zips, params.delivery_zip];
+        if (zips.some((zip) => isCanadianPostal(zip))) {
+          return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
+        }
+        const commodityIssue = checkCommodity(params.commodity);
+        if (commodityIssue) {
+          return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        }
+        const apiKey = WARP_API_KEY();
+        if (!apiKey) {
+          return { content: [{ type: "text", text: "Multi-stop quoting requires a Warp account key (the route prices against your account, unlike single-stop quotes). Signing up is free: https://www.wearewarp.com/agents/account then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
+        }
+
+        const data = await client.multistopQuote(params) as Record<string, unknown>;
+        const inner = (data?.data && typeof data.data === "object" && !Array.isArray(data.data)
+          ? data.data : data) as Record<string, unknown>;
+        const quoteId = (inner.quote_id ?? inner.quoteId) as string | undefined;
+        const totalCharge = (inner.total_charge ?? inner.totalCharge) as number | undefined;
+
+        if (!quoteId) {
+          trackEvent({
+            product: 'warp-agent',
+            source: 'mcp',
+            event_type: 'quote',
+            tool_name: 'warp_multistop_quote',
+            success: false,
+            origin_zip: params.pickup_zip,
+            dest_zip: params.delivery_zip,
+            mode: 'multistop_ftl',
+            duration_ms: Date.now() - start,
+          });
+          return { content: [{ type: "text", text: `No multi-stop rate on this route yet (${zips.join(" → ")}). Multi-stop FTL coverage is route-dependent and still growing — a Warp rep can price it manually: support@wearewarp.com. Raw response: ${JSON.stringify(inner)}` }] };
+        }
+
+        multistopRouteCache.set(quoteId, { stops: zips, totalCharge });
+        logQuote(apiKey, quoteId, params.pickup_zip, params.delivery_zip, "multistop", typeof totalCharge === "number" ? Math.round(totalCharge * 100) : null, params.pallets ?? 1);
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'quote',
+          tool_name: 'warp_multistop_quote',
+          success: true,
+          origin_zip: params.pickup_zip,
+          dest_zip: params.delivery_zip,
+          mode: 'multistop_ftl',
+          quote_id: quoteId,
+          amount_usd: totalCharge,
+          duration_ms: Date.now() - start,
+        });
+        const enriched = {
+          ...inner,
+          stop_sequence: zips.map((zip, i) => ({
+            stop_index: i,
+            zipcode: zip,
+            role: i === 0 ? "pickup" : i === zips.length - 1 ? "delivery" : "transit",
+          })),
+          _note: `Multi-stop quote ${quoteId}${typeof totalCharge === "number" ? ` — $${totalCharge}` : ""}. To book, call warp_multistop_book with one shipments[] leg per pickup→delivery pair, each leg's stop_index referencing the stop_sequence above.`,
+        };
+        return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
+      } catch (err) {
+        const msg = errText(err);
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_multistop_quote',
+          success: false,
+          error_message: msg,
+          duration_ms: Date.now() - start,
+        });
+        if (/rate has not (yet )?been determined/i.test(msg)) {
+          return { content: [{ type: "text", text: `No multi-stop rate on this route yet. Multi-stop FTL coverage is route-dependent and still growing — a Warp rep can price it manually: support@wearewarp.com.` }] };
+        }
+        return { content: [{ type: "text", text: msg }], isError: true };
+      }
+    },
+  );
+
+  // ── 5d. warp_multistop_book ─────────────────────────────────────
+
+  const multistopStopSchema = z.object({
+    stop_index: z.number().int().min(0).describe("Index into the quoted stop sequence: 0 = first pickup, then intermediate stops in order, last = final delivery. warp_multistop_quote echoes the sequence as stop_sequence."),
+    address: z.object({
+      street: z.string().describe("Street address"),
+      city: z.string().describe("City name"),
+      state: z.string().describe("2-letter state code"),
+      zipcode: z.string().describe("5-digit ZIP — must match the quoted stop's ZIP"),
+    }).describe("Full address of this stop"),
+    window_time: z.object({
+      from: z.string().describe("Window open, ISO date-time, e.g. 2026-06-22T08:00:00.000Z"),
+      to: z.string().describe("Window close, ISO date-time, e.g. 2026-06-22T23:59:59.000Z"),
+    }).describe("Arrival window for this stop"),
+    contact_name: z.string().optional().describe("Contact full name"),
+    contact_phone: z.string().optional().describe("Contact phone"),
+    contact_email: z.string().optional().describe("Contact email"),
+  });
+
+  const multistopLegItemSchema = z.object({
+    name: z.string().optional().describe("Item label"),
+    quantity: z.number().int().min(1).describe("Piece count"),
+    packaging: z.string().optional().describe("e.g. pallet"),
+    total_weight: z.number().describe("Total weight across the quantity in lbs (not per piece)"),
+    weight_unit: z.string().optional().describe("Defaults to lbs"),
+    length: z.number().optional().describe("Inches"),
+    width: z.number().optional().describe("Inches"),
+    height: z.number().optional().describe("Inches"),
+    size_unit: z.string().optional().describe("Defaults to IN"),
+    stackable: z.boolean().optional(),
+  });
+
+  server.tool(
+    "warp_multistop_book",
+    "Book a multi-stop FTL route quoted by warp_multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required.",
+    {
+      quote_id: z.string().describe("Quote ID from warp_multistop_quote (PRICING_MULTI_…). Use the id from your MOST RECENT quote — ids expire and rotate."),
+      shipments: z.array(z.object({
+        pickup_info: multistopStopSchema.describe("Where this leg's freight gets picked up"),
+        delivery_info: multistopStopSchema.describe("Where this leg's freight gets dropped"),
+        list_items: z.array(multistopLegItemSchema).min(1).describe("Freight riding this leg"),
+      })).min(2).max(20).describe("One leg per pickup→delivery pair (the gateway requires at least 2)"),
+    },
+    { title: "Book Multi-stop FTL", destructiveHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        const apiKey = WARP_API_KEY();
+        if (!apiKey) {
+          return { content: [{ type: "text", text: "Booking requires your own Warp account. New to Warp? Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
+        }
+        const quoteId = params.quote_id as string;
+        const cached = multistopRouteCache.get(quoteId);
+        if (!cached) {
+          return { content: [{ type: "text", text: `Cannot book: no multi-stop quote found for ${quoteId} in this session. Quote ids are short-lived and rotate. Run warp_multistop_quote first, then book immediately after.` }], isError: true };
+        }
+        // stop_index sanity against the quoted sequence — catches an
+        // off-by-one before the gateway books the wrong stops. Freight can
+        // only ride forward, so each leg's pickup index must precede its
+        // delivery index.
+        const maxIndex = cached.stops.length - 1;
+        const legs = params.shipments as Array<{ pickup_info: { stop_index: number }; delivery_info: { stop_index: number } }>;
+        const badLeg = legs.findIndex((leg) =>
+          leg.pickup_info.stop_index > maxIndex ||
+          leg.delivery_info.stop_index > maxIndex ||
+          leg.pickup_info.stop_index >= leg.delivery_info.stop_index);
+        if (badLeg !== -1) {
+          return { content: [{ type: "text", text: `Cannot book: shipments[${badLeg}] has an invalid stop_index. The quoted route has ${cached.stops.length} stops (0..${maxIndex}: ${cached.stops.join(" → ")}); each leg needs pickup_info.stop_index < delivery_info.stop_index within that range.` }], isError: true };
+        }
+
+        let data: Record<string, unknown>;
+        try {
+          data = await client.multistopBook(params) as Record<string, unknown>;
+        } catch (bookErr) {
+          const m = errText(bookErr);
+          const stale = /quote.*expired|quote.*not valid|quote.*superseded|quoteId is not valid/i.test(m);
+          const reason = stale
+            ? `Booking failed: the quote has expired. Re-run warp_multistop_quote and book again immediately with the fresh id.`
+            : `Booking failed: ${m}`;
+          return { content: [{ type: "text", text: reason }], isError: true };
+        }
+
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'book',
+          tool_name: 'warp_multistop_book',
+          success: true,
+          quote_id: quoteId,
+          amount_usd: cached.totalCharge,
+          origin_zip: cached.stops[0],
+          dest_zip: cached.stops[maxIndex],
+          mode: 'multistop_ftl',
+          customer_id: getCustomerEmail(),
+          customer_name: getCustomerEmail(),
+          duration_ms: Date.now() - start,
+        });
+        const enriched = {
+          ...data,
+          ...(typeof cached.totalCharge === "number"
+            ? {
+                booked_price_usd: cached.totalCharge,
+                price_note: "Multi-stop pricing settles via your Warp account — no card was charged by this call.",
+              }
+            : {}),
+        };
+        return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_multistop_book',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: errText(err) }], isError: true };
+      }
+    },
+  );
+
   // ── 6. warp_track ───────────────────────────────────────────────
 
   server.tool(

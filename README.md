@@ -34,7 +34,7 @@ transaction**, not just the lookup:
 
 ## What it does
 
-23 tools that let an AI agent talk to your Warp account:
+25 tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
@@ -46,6 +46,8 @@ transaction**, not just the lookup:
 | `warp_batch_quote` | Quote many lanes in one call (a whole spreadsheet / CSV) |
 | `warp_book` | Book any quote by id, with pickup + delivery addresses |
 | `warp_batch_book` | Book many already-quoted lanes in one call |
+| `warp_multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
+| `warp_multistop_book` | Book a quoted multi-stop route as per-leg shipments |
 | `warp_track` | Track a shipment by id or order id |
 | `warp_events` | Full tracking event timeline for a shipment |
 | `warp_lane_history` | Past shipments on your lanes |
@@ -62,7 +64,7 @@ transaction**, not just the lookup:
 | `warp_status` | API health + key validity check |
 | `warp_analytics` | Bookings + revenue rollup by source |
 
-_Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one), `warp_multistop_quote` + `warp_multistop_book` (multi-stop FTL coverage is sparse). Contact support@wearewarp.com if you need any of these._
+_Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one). `warp_multistop_quote` + `warp_multistop_book` were also removed in 0.5.68 and re-added in 0.14.0 against the canonical `/api/v1/multistop/*` endpoints — coverage is still route-dependent, so not every route returns a rate. Contact support@wearewarp.com if you need either of the removed tools._
 
 ## Install
 
