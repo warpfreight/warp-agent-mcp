@@ -30,6 +30,8 @@ const RUN_MJS = join(__dirname, "..", "scripts", "run.mjs");
 // Reduced from 20 → 16 in 0.5.68 — removed warp_cancel (Warp blocks self-cancel),
 // warp_rate_card (account-state, AuthorizationRequired for fresh accounts),
 // warp_multistop_quote + warp_multistop_book (sparse backend lane coverage).
+// Multistop re-added in 0.14.0 against the canonical /api/v1/multistop/*
+// endpoints (coverage still route-dependent, surfaced as a clean message).
 const EXPECTED_TOOLS = [
   "warp_analytics",
   "warp_batch_book",
@@ -48,6 +50,8 @@ const EXPECTED_TOOLS = [
   "warp_login",
   "warp_ltl_market_options",
   "warp_ltl_quote",
+  "warp_multistop_book",
+  "warp_multistop_quote",
   "warp_payment_status",
   "warp_quote_history",
   "warp_save_load_template",

@@ -512,48 +512,46 @@ export class WarpClient {
         return this.request("GET", "/customers/rate-card", { auth: true });
     }
     // ── Multi-stop FTL (auth) ─────────────────────────────────────
+    // Routes through the canonical public endpoints (POST /api/v1/multistop/
+    // {quote,book}) which translate snake_case to the gateway dialect
+    // server-side (exact-lowercase `zipcode`, vehicle_type wrapped to the
+    // verified { code } object). Field reference: /api/v1/openapi.json,
+    // operationIds multistopQuote / multistopBook. The previous implementation
+    // posted the raw gateway paths through the /warp proxy with bodies the
+    // gateway validator rejects (book sent { quoteId, stops } — the gateway
+    // requires { quoteId, shipments[] } legs).
     multistopQuote(params) {
-        // Transform MCP stops[] schema → Warp API pickupInfo/deliveryInfo/transits format
-        const stops = params.stops ?? [];
-        const pickupStop = stops.find(s => s.type === 'pickup');
-        const deliveryStop = stops.filter(s => s.type === 'delivery').pop();
-        const transitStops = stops.filter((s, i) => i > 0 && !(s === deliveryStop));
-        const totalPallets = Number(params.total_pallets ?? 1);
-        const totalWeight = Number(params.total_weight_lbs ?? 500);
-        const weightPerUnit = Math.round(totalWeight / totalPallets);
-        const listItems = [{
-                name: 'Freight',
-                qty: totalPallets,
-                quantity: totalPallets,
-                qtyUnit: 'Pallet',
-                weightPerUnit,
-                totalWeight,
-                weightTotal: totalWeight,
-                weightUnit: 'lbs',
-                length: 48, width: 40, height: 48, sizeUnit: 'IN',
-            }];
+        const pallets = Math.max(1, Number(params.pallets ?? 1));
+        const totalWeight = Number(params.total_weight_lbs ?? pallets * 500);
+        const stopZips = params.stop_zips ?? [];
         const body = {
-            pickupDate: params.pickup_date,
-            pickupInfo: { zipcode: pickupStop?.address?.zipCode },
-            deliveryInfo: { zipcode: deliveryStop?.address?.zipCode },
-            transits: transitStops.map(s => ({ zipcode: s.address.zipCode })),
-            listItems,
-            shipmentType: 'FTL',
+            pickup_date: params.pickup_date,
+            pickup_info: { zipcode: params.pickup_zip },
+            transits: stopZips.map((zip) => ({ zipcode: zip })),
+            delivery_info: { zipcode: params.delivery_zip },
+            list_items: [{
+                    name: "Freight",
+                    quantity: pallets,
+                    packaging: "pallet",
+                    total_weight: totalWeight,
+                    weight_unit: "lbs",
+                    length: 48, width: 40, height: 48, size_unit: "IN",
+                    stackable: false,
+                }],
+            // Optional to the validator but required in practice — without a
+            // vehicle the gateway answers "A rate has not yet been determined".
+            vehicle_type: params.vehicle_type || "DRY_VAN_53",
+            shipment_type: "FTL",
         };
-        if (params.vehicle_type)
-            body.vehicleType = params.vehicle_type;
-        return this.request("POST", "/freights/quote/multi-stops", { body, auth: true });
+        return this._selfServe("POST", "/api/v1/multistop/quote", { body });
     }
     multistopBook(params) {
-        const body = {
-            quoteId: params.quote_id,
-            stops: params.stops,
-        };
-        if (params.reference)
-            body.reference = params.reference;
-        if (params.notes)
-            body.notes = params.notes;
-        return this.request("POST", "/freights/booking/multi-stops", { body, auth: true });
+        // One shipments[] leg per pickup→delivery pair (gateway minimum 2), each
+        // { pickup_info{stop_index, address, window_time}, delivery_info{…},
+        // list_items[] }. tools.ts builds the legs; this is a passthrough.
+        return this._selfServe("POST", "/api/v1/multistop/book", {
+            body: { quote_id: params.quote_id, shipments: params.shipments },
+        });
     }
     // ── Status (public) ───────────────────────────────────────────
     status() {
