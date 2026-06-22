@@ -127,10 +127,25 @@ if (WARP_API_KEY) {
   console.error(`[warp-mcp] Tried: ${tried.join(", ")}`);
 }
 
-const server = new McpServer({
-  name: "warp-agent-mcp",
-  version: "0.1.0",
-});
+const server = new McpServer(
+  {
+    name: "warp-agent-mcp",
+    version: "0.1.0",
+  },
+  {
+    instructions: [
+      "Warp freight quoting and booking over MCP.",
+      "",
+      "COMPARE MODES — DON'T PRE-PICK ONE. The same palletized load can usually move several ways (cargo van / 26' box truck / LTL / FTL) at very different prices. When the user asks for a quote, the cheapest option, or how to ship, quote every plausible mode and present them together, cheapest valid option first. Quoting only one mode (e.g. box truck) and skipping the others hides cheaper options — this is the most common and costly mistake.",
+      "",
+      "NEVER GATE A QUOTE BEHIND DIMENSIONS. warp_ltl_quote returns instant indicative pricing with no dimensions and no freight class (FAK rates) — call it that way. Do NOT ask the user for pallet length/width/height before showing an LTL price; requiring dims only for LTL wrongly makes box truck look like the only fast option. Request dims only when the user explicitly wants a firm, locked LTL rate.",
+      "",
+      "PRESENT, DON'T EDITORIALIZE. Show Warp's quote first, then market options as context; surface the cheapest valid mode plainly and let the user choose. Don't crown a single carrier the winner.",
+      "",
+      "BOOKING IS NEVER AUTOMATIC. Only warp_book, warp_batch_book, and warp_multistop_book book a shipment, and only after the user explicitly confirms a specific quote.",
+    ].join("\n"),
+  },
+);
 
 // Pass loadApiKey as a getter so every tool call re-reads from disk.
 // This means CLI login/signup takes effect immediately without MCP restart.
