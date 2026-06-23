@@ -138,7 +138,7 @@ const server = new McpServer(
       "",
       "COMPARE MODES — DON'T PRE-PICK ONE. The same palletized load can usually move several ways (cargo van / 26' box truck / LTL / FTL) at very different prices. When the user asks for a quote, the cheapest option, or how to ship, quote every plausible mode and present them together, cheapest valid option first. Quoting only one mode (e.g. box truck) and skipping the others hides cheaper options — this is the most common and costly mistake.",
       "",
-      "NEVER GATE A QUOTE BEHIND DIMENSIONS. warp_ltl_quote returns instant indicative pricing with no dimensions and no freight class (FAK rates) — call it that way. Do NOT ask the user for pallet length/width/height before showing an LTL price; requiring dims only for LTL wrongly makes box truck look like the only fast option. Request dims only when the user explicitly wants a firm, locked LTL rate.",
+      "DON'T GATE A QUOTE BEHIND DIMENSIONS. If the user hasn't given pallet length/width/height, call warp_ltl_quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) and returns an instant price. Do NOT block on asking for dims; quote first, then pass real dims for an exact rate when the user has them or wants a locked LTL price.",
       "",
       "PRESENT, DON'T EDITORIALIZE. Show Warp's quote first, then market options as context; surface the cheapest valid mode plainly and let the user choose. Don't crown a single carrier the winner.",
       "",
