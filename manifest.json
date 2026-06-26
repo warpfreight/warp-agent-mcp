@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.6.6",
+  "version": "0.14.1",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
-  "long_description": "16 tools covering the full freight booking lifecycle:\n\n- **Quote** \u2014 instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL\n- **Book** \u2014 book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** \u2014 real-time shipment status and full event timeline\n- **Manage** \u2014 list bookings, view invoices, download BOLs and PODs\n- **Auth** \u2014 in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
+  "long_description": "25 tools covering the full freight booking lifecycle:\n\n- **Quote** — instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL; LTL splits the fast Warp rate from the 30+ carrier market comparison so you see a price in ~1-2s\n- **Batch** — price an entire spreadsheet of lanes in one call, then confirm N quoted lanes in one batch book, each rendered as a single card\n- **Multi-stop** — quote and book one truck across 3+ stops\n- **Book** — book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** — real-time shipment status and full event timeline\n- **Manage** — list bookings and quotes, lane history, invoices, BOLs and PODs, saved locations and load templates\n- **Auth** — in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
   "author": {
     "name": "Warp Technology, Inc.",
     "email": "support@wearewarp.com",
@@ -58,11 +58,31 @@
     },
     {
       "name": "warp_ltl_quote",
-      "description": "Quote an LTL shipment \u2014 Warp's flagship freight product"
+      "description": "Quote an LTL shipment — Warp's flagship freight product"
+    },
+    {
+      "name": "warp_ltl_market_options",
+      "description": "Compare LTL rates across 30+ carriers for a lane"
+    },
+    {
+      "name": "warp_batch_quote",
+      "description": "Price an entire spreadsheet of lanes in one call, rendered as a single card"
+    },
+    {
+      "name": "warp_multistop_quote",
+      "description": "Quote one truck across 3+ stops (multi-stop FTL)"
     },
     {
       "name": "warp_book",
       "description": "Book a quoted shipment; charges saved card and auto-refunds on failure"
+    },
+    {
+      "name": "warp_batch_book",
+      "description": "Confirm multiple quoted lanes in one call with a single progress card"
+    },
+    {
+      "name": "warp_multistop_book",
+      "description": "Book a multi-stop FTL shipment across 3+ stops"
     },
     {
       "name": "warp_track",
@@ -73,10 +93,6 @@
       "description": "Full tracking event timeline for a shipment"
     },
     {
-      "name": "warp_lane_history",
-      "description": "Past shipments on your lanes"
-    },
-    {
       "name": "warp_list_bookings",
       "description": "List recent bookings, newest first"
     },
@@ -85,12 +101,32 @@
       "description": "List recent quotes across all sessions"
     },
     {
+      "name": "warp_lane_history",
+      "description": "Past shipments on your lanes"
+    },
+    {
       "name": "warp_get_invoice",
       "description": "Invoice for a delivered shipment"
     },
     {
       "name": "warp_get_documents",
       "description": "Shipment documents (BOL, POD, customs)"
+    },
+    {
+      "name": "warp_locations",
+      "description": "List saved pickup and delivery locations"
+    },
+    {
+      "name": "warp_load_templates",
+      "description": "List saved load templates"
+    },
+    {
+      "name": "warp_save_load_template",
+      "description": "Save a reusable load template"
+    },
+    {
+      "name": "warp_delete_load_template",
+      "description": "Delete a saved load template"
     },
     {
       "name": "warp_login",

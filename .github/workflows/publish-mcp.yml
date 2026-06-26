@@ -1,0 +1,42 @@
+name: Publish to MCP Registry
+
+# Publishes server.json (io.github.warpfreight/warp-agent-mcp) to the official
+# MCP registry (registry.modelcontextprotocol.io). This is the registry entry
+# only — the npm package is published separately. Run it after the npm version
+# is live so the registry references a package that already exists.
+#
+# Triggers:
+#   - push of a v* tag  -> syncs server.json version to the tag, then publishes
+#   - manual dispatch    -> publishes server.json as-is (use to (re)publish the
+#                           current version, e.g. the first 0.14.1 registration)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  publish-registry:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC auth to the registry for the io.github.warpfreight/* namespace — no secret needed
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate (GitHub OIDC — no secret)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Sync server.json version to tag (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          jq --arg v "$VERSION" '.version = $v | (.packages[]?.version) = $v' server.json > server.tmp && mv server.tmp server.json
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
