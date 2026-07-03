@@ -120,6 +120,15 @@ export class WarpClient {
             if (params[k] !== undefined)
                 body[k] = params[k];
         }
+        // Default to a standard 48x40x48 pallet when dims are omitted, so a dims-less
+        // quote returns a price (FAK, standard pallet) instead of MISSING_DIMS — the
+        // behavior the tools advertise. Callers pass real dims for an exact rate.
+        if (body.length_in === undefined)
+            body.length_in = 48;
+        if (body.width_in === undefined)
+            body.width_in = 40;
+        if (body.height_in === undefined)
+            body.height_in = 48;
         const ps = params.pickup_services;
         const ds = params.delivery_services;
         if ((ps && ps.length) || (ds && ds.length)) {

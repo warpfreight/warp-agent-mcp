@@ -239,7 +239,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 1. warp_van_quote ───────────────────────────────────────────
 
   const vanQuoteTool = tool(
-    "warp_van_quote",
+    "van_quote",
     "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -293,7 +293,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 2. warp_box_truck_quote ─────────────────────────────────────
 
   const boxTruckQuoteTool = tool(
-    "warp_box_truck_quote",
+    "box_truck_quote",
     "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -346,7 +346,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 3. warp_ftl_quote ───────────────────────────────────────────
 
   const ftlQuoteTool = tool(
-    "warp_ftl_quote",
+    "ftl_quote",
     "Quote a full truckload (53' dry van). Only origin, destination, and date required.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -398,7 +398,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 4. warp_ltl_quote ───────────────────────────────────────────
 
   const ltlQuoteTool = tool(
-    "warp_ltl_quote",
+    "ltl_quote",
     "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling warp_ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for an exact firm quote; if you don't have dims, quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) for an instant price. Don't block on asking for pallet dimensions; quote first, then pass real dims for an exact rate. When a palletized load could also move by box truck or van, quote LTL alongside those and show the cheapest valid mode. Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -474,7 +474,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // card with the comparison filled in. Same input schema as warp_ltl_quote.
 
   const ltlMarketOptionsTool = tool(
-    "warp_ltl_market_options",
+    "ltl_market_options",
     "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER warp_ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -582,7 +582,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // renders as a single batch-quote card instead of N noisy per-lane calls.
   // Server fans out in parallel (concurrency cap = 8). Warp single rate only.
   const batchQuoteTool = tool(
-    "warp_batch_quote",
+    "batch_quote",
     "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets). Use this WHENEVER the user gives you a spreadsheet, CSV, or list of multiple lanes to quote — do NOT call warp_*_quote in a loop. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with warp_book (\"book row 3\").",
     {
       lanes: z.array(
@@ -687,7 +687,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   });
 
   tool(
-    "warp_book",
+    "book",
     "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required.",
     {
       quote_id: z.string().describe("Quote ID from warp_quote_id (Warp) or id field of any market option returned by a quote tool. Use the id from your MOST RECENT quote — market-option ids rotate on every quote call and stale ids are rejected."),
@@ -813,7 +813,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // seeing the same error N times). Same auth + same per-quote session-cache
   // guard as warp_book.
   const batchBookTool = tool(
-    "warp_batch_book",
+    "batch_book",
     "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row). Use this after warp_batch_quote when the user says \"book all of them\" or \"book rows 1, 3, 5\" — do NOT call warp_book in a loop. Each row needs a quote_id (the same one warp_batch_quote returned for that row). Pickup/delivery default to the shared addresses at the top level so a single warehouse → many destinations only needs one address pair. Returns a progress card showing per-row Booked/Failed status with tracking numbers.",
     {
       bookings: z.array(
@@ -978,7 +978,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   const multistopRouteCache = new Map<string, { stops: string[]; totalCharge?: number }>();
 
   tool(
-    "warp_multistop_quote",
+    "multistop_quote",
     "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery). Use for milk runs, pool distribution, or multi-store replenishment on a single truck — for a simple A→B truckload use warp_ftl_quote. Auth required (free account). Coverage is route-dependent — not every route has a rate yet.",
     {
       pickup_zip: z.string().regex(/^\d{5}$/).describe("5-digit ZIP of the first pickup stop"),
@@ -1105,7 +1105,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   });
 
   tool(
-    "warp_multistop_book",
+    "multistop_book",
     "Book a multi-stop FTL route quoted by warp_multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required.",
     {
       quote_id: z.string().describe("Quote ID from warp_multistop_quote (PRICING_MULTI_…). Use the id from your MOST RECENT quote — ids expire and rotate."),
@@ -1197,7 +1197,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 6. warp_track ───────────────────────────────────────────────
 
   tool(
-    "warp_track",
+    "track",
     "Track a shipment by ID or tracking number. Auth required.",
     {
       shipment_id: z.string().describe("Shipment ID or tracking number (e.g. S-12345-2616)"),
@@ -1248,7 +1248,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 8. warp_lane_history ────────────────────────────────────────
 
   tool(
-    "warp_lane_history",
+    "lane_history",
     "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required.",
     {},
     { title: "View Lane History", readOnlyHint: true },
@@ -1283,7 +1283,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 9. warp_list_bookings ───────────────────────────────────────
 
   const listBookingsTool = tool(
-    "warp_list_bookings",
+    "list_bookings",
     "List recent bookings for this API key, newest first. Auth required. Renders an interactive shipments card (click a shipment to expand pickup/delivery, freight, and a tracking link).",
     {
       limit: z.number().int().min(1).max(100).optional().describe("Max bookings to return (default 25, max 100)"),
@@ -1322,7 +1322,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 11. warp_status ─────────────────────────────────────────────
 
   tool(
-    "warp_status",
+    "status",
     "Check Warp API health and version. Also validates your API key if one is configured.",
     {},
     { title: "Check API Status", readOnlyHint: true },
@@ -1372,7 +1372,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 12. warp_events ─────────────────────────────────────────────
 
   tool(
-    "warp_events",
+    "events",
     "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries). Auth required.",
     {
       shipment_id: z.string().describe("Shipment ID from warp_book response"),
@@ -1410,7 +1410,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 13. warp_get_invoice ────────────────────────────────────────
 
   tool(
-    "warp_get_invoice",
+    "get_invoice",
     "Retrieve the invoice for a delivered shipment (line items, taxes, payment status). Auth required.",
     {
       order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
@@ -1448,7 +1448,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 14. warp_get_documents ──────────────────────────────────────
 
   tool(
-    "warp_get_documents",
+    "get_documents",
     "List shipment documents (BOL, POD, customs forms, etc.). Returns download URLs. Auth required. To fetch the Bill of Lading, pass document_type='bol' — this is how EXTERNAL / brokered (market-carrier) BOLs are returned now, not just Warp-carrier ones.",
     {
       order_id: z.string().describe("Order ID (typically the same as shipment_id)"),
@@ -1489,7 +1489,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── 15. warp_quote_history ──────────────────────────────────────────────────────
 
   tool(
-    "warp_quote_history",
+    "quote_history",
     "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required.",
     {},
     { title: "View Quote History", readOnlyHint: true },
@@ -1513,7 +1513,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── warp_login ────────────────────────────────────────────────
 
   tool(
-    "warp_login",
+    "login",
     "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if warp_payment_status says no key is configured.",
     {
       email: z.string().email().describe("Warp account email"),
@@ -1591,7 +1591,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── warp_payment_status ───────────────────────────────────────
 
   tool(
-    "warp_payment_status",
+    "payment_status",
     "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.",
     {},
     { title: "Check Payment Status", readOnlyHint: true },
@@ -1620,7 +1620,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // ── warp_analytics ─────────────────────────────────────────
 
   tool(
-    "warp_analytics",
+    "analytics",
     "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.",
     {},
     { title: "View Analytics", readOnlyHint: true },
@@ -1636,7 +1636,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── warp_locations ─────────────────────────────────────────
   tool(
-    "warp_locations",
+    "locations",
     "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses. Auth required.",
     {},
     { title: "List Saved Locations", readOnlyHint: true },
@@ -1652,7 +1652,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── warp_load_templates ────────────────────────────────────
   tool(
-    "warp_load_templates",
+    "load_templates",
     "List the agent's saved load templates — reusable shipment configs (name, dims, weight, commodity). Recall one to quote/book a repeat kind of load without re-entering details. Auth required.",
     {},
     { title: "List Load Templates", readOnlyHint: true },
@@ -1668,7 +1668,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── warp_save_load_template ────────────────────────────────
   tool(
-    "warp_save_load_template",
+    "save_load_template",
     "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes. Auth required.",
     {
       name: z.string().describe("Friendly name, e.g. 'Standard 2-pallet LA load'"),
@@ -1694,7 +1694,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── warp_delete_load_template ──────────────────────────────
   tool(
-    "warp_delete_load_template",
+    "delete_load_template",
     "Delete a saved load template by its id (starts with lt_). Auth required.",
     {
       load_template_id: z.string().describe("Template id to delete (starts with lt_)"),

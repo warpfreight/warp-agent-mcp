@@ -138,11 +138,11 @@ const server = new McpServer(
       "",
       "COMPARE MODES — DON'T PRE-PICK ONE. The same palletized load can usually move several ways (cargo van / 26' box truck / LTL / FTL) at very different prices. When the user asks for a quote, the cheapest option, or how to ship, quote every plausible mode and present them together, cheapest valid option first. Quoting only one mode (e.g. box truck) and skipping the others hides cheaper options — this is the most common and costly mistake.",
       "",
-      "DON'T GATE A QUOTE BEHIND DIMENSIONS. If the user hasn't given pallet length/width/height, call warp_ltl_quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) and returns an instant price. Do NOT block on asking for dims; quote first, then pass real dims for an exact rate when the user has them or wants a locked LTL price.",
+      "DON'T GATE A QUOTE BEHIND DIMENSIONS. If the user hasn't given pallet length/width/height, call ltl_quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) and returns an instant price. Do NOT block on asking for dims; quote first, then pass real dims for an exact rate when the user has them or wants a locked LTL price.",
       "",
       "PRESENT, DON'T EDITORIALIZE. Show Warp's quote first, then market options as context; surface the cheapest valid mode plainly and let the user choose. Don't crown a single carrier the winner.",
       "",
-      "BOOKING IS NEVER AUTOMATIC. Only warp_book, warp_batch_book, and warp_multistop_book book a shipment, and only after the user explicitly confirms a specific quote.",
+      "BOOKING IS NEVER AUTOMATIC. Only book, batch_book, and multistop_book book a shipment, and only after the user explicitly confirms a specific quote.",
     ].join("\n"),
   },
 );
@@ -162,7 +162,7 @@ server.registerResource(
   QUOTE_CARD_RESOURCE_URI,
   {
     description:
-      "Inline quote card shown after warp_van_quote / warp_box_truck_quote / warp_ftl_quote / warp_ltl_quote. Renders rate, lane, transit, expiration countdown, and a Book CTA.",
+      "Inline quote card shown after van_quote / box_truck_quote / ftl_quote / ltl_quote. Renders rate, lane, transit, expiration countdown, and a Book CTA.",
     mimeType: "text/html",
   },
   async () => ({
@@ -178,7 +178,7 @@ server.registerResource(
   QUOTE_CARD_MCP_RESOURCE_URI,
   {
     description:
-      "Inline quote card (MCP Apps) shown after warp_van_quote / warp_box_truck_quote / warp_ftl_quote / warp_ltl_quote. Renders rate, lane, transit, expiration, and a Book CTA.",
+      "Inline quote card (MCP Apps) shown after van_quote / box_truck_quote / ftl_quote / ltl_quote. Renders rate, lane, transit, expiration, and a Book CTA.",
     mimeType: MCP_APP_MIME_TYPE,
   },
   async () => ({
@@ -186,7 +186,7 @@ server.registerResource(
   }),
 );
 
-// Inline bookings/shipments card — a mini-TMS shown after warp_list_bookings.
+// Inline bookings/shipments card — a mini-TMS shown after list_bookings.
 // ChatGPT (text/html) reads structuredContent; Claude (mcp-app) gets the result
 // over the postMessage bridge. Clients without UI fall back to the text JSON.
 server.registerResource(
@@ -194,7 +194,7 @@ server.registerResource(
   BOOKINGS_CARD_RESOURCE_URI,
   {
     description:
-      "Inline shipments card shown after warp_list_bookings. Lists shipments as clickable rows; each expands to pickup/delivery detail, freight, and a Track shipment deep-link.",
+      "Inline shipments card shown after list_bookings. Lists shipments as clickable rows; each expands to pickup/delivery detail, freight, and a Track shipment deep-link.",
     mimeType: "text/html",
   },
   async () => ({
@@ -207,7 +207,7 @@ server.registerResource(
   BOOKINGS_CARD_MCP_RESOURCE_URI,
   {
     description:
-      "Inline shipments card (MCP Apps) shown after warp_list_bookings. Clickable shipment rows expand to full detail with a Track shipment deep-link.",
+      "Inline shipments card (MCP Apps) shown after list_bookings. Clickable shipment rows expand to full detail with a Track shipment deep-link.",
     mimeType: MCP_APP_MIME_TYPE,
   },
   async () => ({
@@ -216,13 +216,13 @@ server.registerResource(
 );
 
 // Inline batch-quote card — single card showing every priced lane after a
-// warp_batch_quote call (one tool call instead of N noisy per-lane calls).
+// batch_quote call (one tool call instead of N noisy per-lane calls).
 server.registerResource(
   "warp-batch-quote-card",
   BATCH_QUOTE_CARD_RESOURCE_URI,
   {
     description:
-      "Inline batch-quote card shown after warp_batch_quote. Renders N priced lanes in a single scrollable card; click a row to expand its quote_id + transit + delivery for booking.",
+      "Inline batch-quote card shown after batch_quote. Renders N priced lanes in a single scrollable card; click a row to expand its quote_id + transit + delivery for booking.",
     mimeType: "text/html",
   },
   async () => ({
@@ -235,7 +235,7 @@ server.registerResource(
   BATCH_QUOTE_CARD_MCP_RESOURCE_URI,
   {
     description:
-      "Inline batch-quote card (MCP Apps) shown after warp_batch_quote. Single card, N rows, one price per lane.",
+      "Inline batch-quote card (MCP Apps) shown after batch_quote. Single card, N rows, one price per lane.",
     mimeType: MCP_APP_MIME_TYPE,
   },
   async () => ({
@@ -244,14 +244,14 @@ server.registerResource(
 );
 
 // Inline batch-book progress card — single card showing per-row booking
-// status after a warp_batch_book call. Replaces N noisy per-row warp_book
+// status after a batch_book call. Replaces N noisy per-row book
 // calls with one progress card (Booked/Failed pills, tracking links).
 server.registerResource(
   "warp-batch-book-card",
   BATCH_BOOK_CARD_RESOURCE_URI,
   {
     description:
-      "Inline batch-book progress card shown after warp_batch_book. Renders N bookings in a single card with per-row Booked/Failed pills, tracking numbers, and click-to-expand detail (tracking_url, order_id, amount charged).",
+      "Inline batch-book progress card shown after batch_book. Renders N bookings in a single card with per-row Booked/Failed pills, tracking numbers, and click-to-expand detail (tracking_url, order_id, amount charged).",
     mimeType: "text/html",
   },
   async () => ({
@@ -264,7 +264,7 @@ server.registerResource(
   BATCH_BOOK_CARD_MCP_RESOURCE_URI,
   {
     description:
-      "Inline batch-book progress card (MCP Apps) shown after warp_batch_book. Single card, N rows, one booking status per row.",
+      "Inline batch-book progress card (MCP Apps) shown after batch_book. Single card, N rows, one booking status per row.",
     mimeType: MCP_APP_MIME_TYPE,
   },
   async () => ({
