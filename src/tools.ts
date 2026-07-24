@@ -60,19 +60,19 @@ function quoteToolResult(mode: QuoteMode, input: QuoteInput, data: Record<string
   return result;
 }
 
-// MCP Apps UI linkage for the bookings/shipments card (warp_list_bookings).
+// MCP Apps UI linkage for the bookings/shipments card (list_bookings).
 const BOOKINGS_UI_META: Record<string, unknown> = {
   ui: { resourceUri: BOOKINGS_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
   "ui/resourceUri": BOOKINGS_CARD_MCP_RESOURCE_URI,
 };
 
-// MCP Apps UI linkage for the batch-quote card (warp_batch_quote).
+// MCP Apps UI linkage for the batch-quote card (batch_quote).
 const BATCH_QUOTE_UI_META: Record<string, unknown> = {
   ui: { resourceUri: BATCH_QUOTE_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
   "ui/resourceUri": BATCH_QUOTE_CARD_MCP_RESOURCE_URI,
 };
 
-// MCP Apps UI linkage for the batch-book progress card (warp_batch_book).
+// MCP Apps UI linkage for the batch-book progress card (batch_book).
 const BATCH_BOOK_UI_META: Record<string, unknown> = {
   ui: { resourceUri: BATCH_BOOK_CARD_MCP_RESOURCE_URI, visibility: ["model", "app"] },
   "ui/resourceUri": BATCH_BOOK_CARD_MCP_RESOURCE_URI,
@@ -129,7 +129,7 @@ function batchQuoteToolResult(rawLanes: Array<{ row: number; ok: boolean; mode: 
   return result;
 }
 
-// Wrap warp_list_bookings so UI-capable clients render the inline mini-TMS card.
+// Wrap list_bookings so UI-capable clients render the inline mini-TMS card.
 // The text payload is enriched with a canonical `tracking_url` per shipment so
 // the model never has to fabricate a tracking link (it had been guessing the
 // wrong host). Non-UI clients fall back to that enriched JSON.
@@ -172,7 +172,7 @@ function errText(err: unknown): string {
   return String(err);
 }
 
-// Session-level cache: PRICING_xxx -> amount so warp_book can log revenue
+// Session-level cache: PRICING_xxx -> amount so book can log revenue
 const quoteAmountCache = new Map<string, number>();
 
 function validateDate(date: string): true | string {
@@ -187,7 +187,7 @@ function validateDate(date: string): true | string {
 }
 
 
-// Log quotes to our DB so warp_quote_history works across all surfaces
+// Log quotes to our DB so quote_history works across all surfaces
 async function logQuote(apiKey: string | undefined, quoteId: string, originZip: string, destZip: string, mode: string, priceCents: number | null, pallets: number): Promise<void> {
   if (!apiKey || !quoteId) return;
   try {
@@ -208,13 +208,19 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // top-level `title` (MCP 2025-06) and fall back to the wire `name` — they do NOT
   // use `annotations.title`, which is why the curated annotation titles weren't
   // showing. We promote the existing curated annotation title when present, else
-  // de-prefix the wire name ("warp_ltl_quote" -> "ltl_quote").
+  // fall back to the wire name.
   //
-  // The wire `name` stays warp_* — docs, llms.txt, saved configs, and external
-  // scripts that call tools by name are completely unaffected. Returns the same
-  // RegisteredTool as server.registerTool(), so existing `.update({ _meta })` works.
-  // Handles both server.tool(name, desc, schema, handler) and the 5-arg
-  // server.tool(name, desc, schema, annotations, handler) forms.
+  // NOTE ON NAMING: wire names are UNPREFIXED as of 0.15.0 ("ltl_quote", not
+  // "warp_ltl_quote") — the rename shipped in b1f7d73 and warp-mcp-remote was
+  // bumped to match. The startsWith("warp_") strip below is now a no-op kept
+  // only so a re-prefixed name would still render a clean title. Anything that
+  // NAMES a tool (descriptions, README, e2e EXPECTED_TOOLS) must use the
+  // unprefixed form; our analytics `tool_name: 'warp_*'` labels are deliberately
+  // left prefixed because they are telemetry identifiers, not callable names.
+  //
+  // Returns the same RegisteredTool as server.registerTool(), so existing
+  // `.update({ _meta })` works. Handles both server.tool(name, desc, schema,
+  // handler) and the 5-arg server.tool(name, desc, schema, annotations, handler).
   function tool<Args extends z.ZodRawShape>(name: string, description: string, schema: Args, handler: ToolCallback<Args>): RegisteredTool;
   function tool<Args extends z.ZodRawShape>(name: string, description: string, schema: Args, annotations: ToolAnnotations, handler: ToolCallback<Args>): RegisteredTool;
   function tool<Args extends z.ZodRawShape>(
@@ -236,7 +242,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       handler,
     );
   }
-  // ── 1. warp_van_quote ───────────────────────────────────────────
+  // ── 1. van_quote ───────────────────────────────────────────
 
   const vanQuoteTool = tool(
     "van_quote",
@@ -290,7 +296,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 2. warp_box_truck_quote ─────────────────────────────────────
+  // ── 2. box_truck_quote ─────────────────────────────────────
 
   const boxTruckQuoteTool = tool(
     "box_truck_quote",
@@ -343,7 +349,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 3. warp_ftl_quote ───────────────────────────────────────────
+  // ── 3. ftl_quote ───────────────────────────────────────────
 
   const ftlQuoteTool = tool(
     "ftl_quote",
@@ -395,11 +401,11 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 4. warp_ltl_quote ───────────────────────────────────────────
+  // ── 4. ltl_quote ───────────────────────────────────────────
 
   const ltlQuoteTool = tool(
     "ltl_quote",
-    "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling warp_ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for an exact firm quote; if you don't have dims, quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) for an instant price. Don't block on asking for pallet dimensions; quote first, then pass real dims for an exact rate. When a palletized load could also move by box truck or van, quote LTL alongside those and show the cheapest valid mode. Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
+    "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for an exact firm quote; if you don't have dims, quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) for an instant price. Don't block on asking for pallet dimensions; quote first, then pass real dims for an exact rate. When a palletized load could also move by box truck or van, quote LTL alongside those and show the cheapest valid mode. Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
       destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -468,14 +474,14 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 4b. warp_ltl_market_options ─────────────────────────────────
-  // Follow-up to warp_ltl_quote: fetches the 30+ carrier spread (~15s) AND
+  // ── 4b. ltl_market_options ─────────────────────────────────
+  // Follow-up to ltl_quote: fetches the 30+ carrier spread (~15s) AND
   // re-issues the Warp quote in parallel, then renders the same inline quote
-  // card with the comparison filled in. Same input schema as warp_ltl_quote.
+  // card with the comparison filled in. Same input schema as ltl_quote.
 
   const ltlMarketOptionsTool = tool(
     "ltl_market_options",
-    "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER warp_ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list.",
+    "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
       destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -504,7 +510,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           client.ltlQuote(params, params.origin_zip, params.destination_zip).catch(() => ({})) as Promise<Record<string, unknown>>,
           client.ltlMarketOptions(params).catch(() => [] as unknown[]),
         ]);
-        // Cache Warp quote amount so warp_book can log revenue
+        // Cache Warp quote amount so book can log revenue
         const qid = warpRaw?.warp_quote_id as string | undefined;
         const qamt = warpRaw?.warp_price as number | undefined;
         if (qid && qamt) quoteAmountCache.set(qid, qamt);
@@ -526,7 +532,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
             row.quote_id = qid;
             if (typeof qamt === "number") row.price_usd = qamt;
           }
-          // Cache every bookable row's amount so warp_book's session guard
+          // Cache every bookable row's amount so book's session guard
           // passes (and revenue logs) when the user books a specific carrier,
           // not just the headline Warp quote.
           const rid = typeof row?.quote_id === "string" ? row.quote_id : undefined;
@@ -577,13 +583,282 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     t?.update({ _meta: UI_META });
   }
 
-  // ── 4c. warp_batch_quote ────────────────────────────────────────
+  // ── 4d. mode_compare ────────────────────────────────────────────
+  // The broker brain. One call that does the judgment a shipper pays a broker
+  // for: decide which modes the load can legally ride, price every eligible one
+  // IN PARALLEL, and return a single decision-complete recommendation with the
+  // trade-off math already done.
+  //
+  // Why this exists as a tool and not as prompt guidance: the server
+  // instructions ask the model to quote every plausible mode and compare them
+  // itself. That is the most common and costly failure we see — the model picks
+  // one mode, skips the cheaper one, and the shipper overpays. Encoding the
+  // comparison server-side makes the right answer the DEFAULT instead of a
+  // behavior we hope the host's model exhibits.
+  //
+  // Decision-complete from `structuredContent` alone — no HTML required — so a
+  // text-only MCP host renders the same answer a widget host does.
+  //
+  // QUOTE-ONLY. This tool never books. It returns quote ids that a human can
+  // confirm through `book`, exactly like every other quote tool.
+  const MODE_LABELS: Record<QuoteMode, string> = {
+    "van": "Cargo van",
+    "box-truck": "26' box truck",
+    "ftl": "FTL (53' dry van)",
+    "ltl": "LTL (shared)",
+  };
+
+  // Structural limits, copied from each single-mode tool's own input schema
+  // above so eligibility can never drift from what the mode actually accepts.
+  const MODE_LIMITS: Record<QuoteMode, { maxPallets: number; maxWeightPerPallet: number }> = {
+    "van": { maxPallets: 3, maxWeightPerPallet: 3500 },
+    "box-truck": { maxPallets: 12, maxWeightPerPallet: 10000 },
+    "ftl": { maxPallets: 26, maxWeightPerPallet: 5000 },
+    "ltl": { maxPallets: 26, maxWeightPerPallet: 5000 },
+  };
+
+  const usd = (n: number): string =>
+    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Errors are agent UX: a mode that failed to price must read as a sentence the
+  // agent can relay, not as an escaped JSON blob. Upstream hands us the reason in
+  // a few shapes (WarpApiError.body as an object, as a JSON string, or plain
+  // text) — dig out the human message and fall back gracefully.
+  const upstreamReason = (err: unknown): string => {
+    let body: unknown = err instanceof WarpApiError ? err.body : err instanceof Error ? err.message : err;
+    if (typeof body === "string") {
+      const raw: string = body;
+      try { body = JSON.parse(raw); } catch { return raw.slice(0, 160); }
+    }
+    if (body && typeof body === "object") {
+      const rec = body as Record<string, unknown>;
+      for (const k of ["error", "message", "detail", "_note"]) {
+        if (typeof rec[k] === "string" && rec[k]) return (rec[k] as string).slice(0, 160);
+      }
+    }
+    return String(body ?? "no rate returned").slice(0, 160);
+  };
+
+  type PricedMode = {
+    mode: QuoteMode; mode_label: string; price_usd: number;
+    transit_days: number | null; delivery_date: string | null;
+    quote_id: string; expires_at: string | null; booking_url: string | null;
+  };
+
+  tool(
+    "mode_compare",
+    "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Compares EVERY freight mode the load can legally ride (cargo van / 26' box truck / LTL / FTL) in ONE parallel call and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — mode eligibility and the cost-per-day-saved math are computed server-side, so the cheapest valid option can't be missed. Dims are optional (a standard 48x40x48 pallet is assumed). Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.",
+    {
+      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
+      pallets: z.number().int().min(1).max(26).describe("Number of pallets (1-26)"),
+      weight_lbs_per_pallet: z.number().min(50).max(10000).describe("Weight per pallet in lbs"),
+      commodity: z.string().optional().describe("Commodity description"),
+      length_in: z.number().positive().optional().describe("Pallet length in inches (defaults to 48)"),
+      width_in: z.number().positive().optional().describe("Pallet width in inches (defaults to 40)"),
+      height_in: z.number().positive().optional().describe("Pallet height in inches (defaults to 48)"),
+      freight_class: z.string().optional().describe("Freight class (optional, FAK rates used if omitted)"),
+      stackable: z.boolean().optional().describe("Whether pallets are stackable"),
+      hazmat: z.boolean().optional().describe("Hazardous materials flag"),
+      pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
+      delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
+      priority: z.enum(["cheapest", "fastest"]).optional().describe("What to optimize the recommendation for. Defaults to 'cheapest'."),
+    },
+    { title: "Compare Freight Modes", readOnlyHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
+          return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
+        }
+        // Same ambient/shelf-stable policy the booking path enforces — refuse
+        // reefer freight before spending four upstream quote calls on it.
+        const commodityIssue = checkCommodity(params.commodity);
+        if (commodityIssue) {
+          return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        }
+
+        const priority = params.priority ?? "cheapest";
+        const pallets = params.pallets;
+        const weightPer = params.weight_lbs_per_pallet;
+        const totalWeight = pallets * weightPer;
+
+        // 1. Eligibility — the first half of the broker judgment. A mode that
+        //    structurally can't carry the load is never quoted, and the reason
+        //    is reported so the agent can explain it.
+        const eligible: QuoteMode[] = [];
+        const unavailable: Array<{ mode: string; mode_label: string; reason: string }> = [];
+        for (const mode of ["van", "box-truck", "ltl", "ftl"] as QuoteMode[]) {
+          const lim = MODE_LIMITS[mode];
+          const reasons: string[] = [];
+          if (pallets > lim.maxPallets) reasons.push(`holds ${lim.maxPallets} pallet${lim.maxPallets === 1 ? "" : "s"}, this load is ${pallets}`);
+          if (weightPer > lim.maxWeightPerPallet) reasons.push(`tops out at ${lim.maxWeightPerPallet.toLocaleString("en-US")} lb per pallet, this load is ${weightPer.toLocaleString("en-US")} lb`);
+          if (reasons.length) unavailable.push({ mode, mode_label: MODE_LABELS[mode], reason: `${MODE_LABELS[mode]} ${reasons.join("; ")}.` });
+          else eligible.push(mode);
+        }
+
+        // 2. Price every eligible mode CONCURRENTLY. allSettled (not all) so one
+        //    dead mode never suppresses the rest — a lane with no van coverage
+        //    must still return its LTL and FTL rates.
+        const quoteFor = (mode: QuoteMode) => {
+          const p = params as unknown as Record<string, unknown>;
+          if (mode === "van") return client.vanQuote(p);
+          if (mode === "box-truck") return client.boxTruckQuote(p);
+          if (mode === "ftl") return client.ftlQuote(p);
+          return client.ltlQuote(p);
+        };
+        const settled = await Promise.allSettled(eligible.map((m) => quoteFor(m)));
+
+        const priced: PricedMode[] = [];
+        settled.forEach((outcome, i) => {
+          const mode = eligible[i];
+          const label = MODE_LABELS[mode];
+          if (outcome.status === "rejected") {
+            // Upstream threw (non-2xx / timeout). Report it honestly as a mode
+            // that couldn't be priced — never silently drop it.
+            unavailable.push({ mode, mode_label: label, reason: `${label}: no live rate on this lane — ${upstreamReason(outcome.reason)}. The other modes below are unaffected.` });
+            return;
+          }
+          const data = outcome.value as Record<string, unknown>;
+          const quoteId = (data.warp_quote_id as string | null) ?? null;
+          const price = (data.warp_price as number | null) ?? null;
+          if (!quoteId || typeof price !== "number") {
+            // 200 with no quote id = genuinely no Warp coverage for that mode.
+            unavailable.push({ mode, mode_label: label, reason: (data._note as string) || `No ${label} coverage on this lane.` });
+            return;
+          }
+          quoteAmountCache.set(quoteId, price);
+          for (const o of ((data.options as Array<Record<string, unknown>>) ?? [])) {
+            if (o.id && o.rate) quoteAmountCache.set(o.id as string, o.rate as number);
+          }
+          logQuote(WARP_API_KEY(), quoteId, params.origin_zip, params.destination_zip, mode.toUpperCase(), Math.round(price * 100), pallets);
+          priced.push({
+            mode, mode_label: label, price_usd: price,
+            transit_days: (data.warp_transit_days as number | null) ?? null,
+            delivery_date: (data.delivery_date as string | null) ?? null,
+            quote_id: quoteId,
+            expires_at: (data.expires_at as string | null) ?? null,
+            booking_url: (data.booking_url as string | null) ?? null,
+          });
+        });
+
+        // 3. Rank. Unknown transit sorts last on the "fastest" axis rather than
+        //    pretending to be instant.
+        const byPrice = (a: PricedMode, b: PricedMode) => a.price_usd - b.price_usd;
+        const transitOf = (m: PricedMode) => m.transit_days ?? Number.POSITIVE_INFINITY;
+        priced.sort(priority === "fastest"
+          ? (a, b) => (transitOf(a) - transitOf(b)) || byPrice(a, b)
+          : byPrice);
+
+        if (!priced.length) {
+          const why = unavailable.map((u) => `• ${u.reason}`).join("\n");
+          return {
+            content: [{ type: "text", text: `No mode could be priced for ${params.origin_zip} → ${params.destination_zip} on ${params.pickup_date}.\n\n${why}\n\n${coverageGapRefusal(params.origin_zip, params.destination_zip)}` }],
+            structuredContent: {
+              lane: { origin_zip: params.origin_zip, destination_zip: params.destination_zip, pickup_date: params.pickup_date },
+              recommended: null, alternatives: [], unavailable,
+              priced_modes: 0, compared_modes: eligible.length, elapsed_ms: Date.now() - start,
+            },
+            isError: true,
+          };
+        }
+
+        // 4. The trade-off math — the part a rate lookup can't give you. Compare
+        //    the winner to the mode that beats it on the OTHER axis, and price
+        //    the difference per day, so the answer is decision-complete.
+        const winner = priced[0];
+        const rest = priced.slice(1);
+        let why: string;
+        if (!rest.length) {
+          why = `${winner.mode_label} is the only mode with live coverage for this load on this lane.`;
+        } else if (priority === "fastest") {
+          const cheapest = [...rest].sort(byPrice)[0];
+          const premium = winner.price_usd - cheapest.price_usd;
+          const daysSaved = transitOf(cheapest) - transitOf(winner);
+          why = premium > 0 && Number.isFinite(daysSaved) && daysSaved > 0
+            ? `${winner.mode_label} is ${daysSaved} day${daysSaved === 1 ? "" : "s"} faster than ${cheapest.mode_label} for ${usd(premium)} more — ${usd(premium / daysSaved)} per day saved.`
+            : `${winner.mode_label} is the fastest option at ${usd(winner.price_usd)}.`;
+        } else {
+          const fastest = [...rest].sort((a, b) => transitOf(a) - transitOf(b))[0];
+          const savings = fastest.price_usd - winner.price_usd;
+          const daysSlower = transitOf(winner) - transitOf(fastest);
+          why = savings > 0 && Number.isFinite(daysSlower) && daysSlower > 0
+            ? `${winner.mode_label} is ${usd(savings)} cheaper than ${fastest.mode_label} and ${daysSlower} day${daysSlower === 1 ? "" : "s"} slower — the ${fastest.mode_label} premium buys each day back at ${usd(savings / daysSlower)}.`
+            : savings > 0
+              ? `${winner.mode_label} is ${usd(savings)} cheaper than ${fastest.mode_label} with no transit penalty.`
+              : `${winner.mode_label} is the cheapest option at ${usd(winner.price_usd)}.`;
+        }
+
+        const summary = [
+          `${winner.mode_label} — ${usd(winner.price_usd)}${winner.transit_days ? `, ${winner.transit_days} day${winner.transit_days === 1 ? "" : "s"}` : ""}${winner.delivery_date ? `, delivers ${winner.delivery_date}` : ""}`,
+          why,
+          rest.length ? `Alternatives: ${rest.map((r) => `${r.mode_label} ${usd(r.price_usd)}${r.transit_days ? `/${r.transit_days}d` : ""}`).join(" · ")}` : "",
+          unavailable.length ? `Not available: ${unavailable.map((u) => u.mode_label).join(", ")}` : "",
+          `Quote id ${winner.quote_id} — booking requires explicit confirmation.`,
+        ].filter(Boolean).join("\n");
+
+        const structured = {
+          lane: { origin_zip: params.origin_zip, destination_zip: params.destination_zip, pickup_date: params.pickup_date },
+          load: {
+            pallets, weight_lbs_per_pallet: weightPer, total_weight_lbs: totalWeight,
+            dims_in: { length: params.length_in ?? 48, width: params.width_in ?? 40, height: params.height_in ?? 48 },
+            dims_assumed: params.length_in === undefined || params.width_in === undefined || params.height_in === undefined,
+            commodity: params.commodity ?? null,
+          },
+          priority,
+          recommended: { ...winner, why },
+          alternatives: rest,
+          unavailable,
+          priced_modes: priced.length,
+          compared_modes: eligible.length,
+          elapsed_ms: Date.now() - start,
+          next_step: `To book, call \`book\` with quote_id "${winner.quote_id}" plus pickup and delivery addresses — only after the user explicitly confirms. This tool never books.`,
+        };
+
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'quote',
+          tool_name: 'warp_mode_compare',
+          success: true,
+          origin_zip: params.origin_zip,
+          dest_zip: params.destination_zip,
+          mode: `compare:${winner.mode}`,
+          amount_usd: winner.price_usd,
+          quote_id: winner.quote_id,
+          duration_ms: Date.now() - start,
+        });
+
+        return {
+          content: [
+            { type: "text", text: summary },
+            { type: "text", text: JSON.stringify(structured, null, 2) },
+          ],
+          structuredContent: structured,
+        };
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_mode_compare',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: errText(err) }], isError: true };
+      }
+    },
+  );
+
+  // ── 4c. batch_quote ─────────────────────────────────────────────
   // Price N lanes in ONE tool call so a spreadsheet (or any list of lanes)
   // renders as a single batch-quote card instead of N noisy per-lane calls.
   // Server fans out in parallel (concurrency cap = 8). Warp single rate only.
   const batchQuoteTool = tool(
     "batch_quote",
-    "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets). Use this WHENEVER the user gives you a spreadsheet, CSV, or list of multiple lanes to quote — do NOT call warp_*_quote in a loop. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with warp_book (\"book row 3\").",
+    "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets). Use this WHENEVER the user gives you a spreadsheet, CSV, or list of multiple lanes to quote — do NOT call warp_*_quote in a loop. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with book (\"book row 3\").",
     {
       lanes: z.array(
         z.object({
@@ -619,7 +894,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           }
         }
         const results = await client.batchQuote(rawLanes);
-        // Cache each priced lane's quote_id → amount so warp_book can log revenue.
+        // Cache each priced lane's quote_id → amount so book can log revenue.
         for (const r of results) {
           if (!r.ok || !r.result) continue;
           const qid = r.result.warp_quote_id as string | undefined;
@@ -651,7 +926,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   );
   batchQuoteTool?.update({ _meta: BATCH_QUOTE_UI_META });
 
-  // ── 5. warp_book ────────────────────────────────────────────────
+  // ── 5. book ────────────────────────────────────────────────
 
   // IMPORTANT: pickup and delivery MUST be two distinct z.object() instances,
   // not a shared `addressSchema`. zod-to-json-schema deduplicates shared
@@ -711,7 +986,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const quoteId = params.quote_id as string;
         const cachedAmount = quoteAmountCache.get(quoteId);
         if (!cachedAmount) {
-          return { content: [{ type: "text", text: `Cannot book: no quote found for ${quoteId} in this session. Quote ids are short-lived and rotate on every quote call. Run warp_ltl_quote (or van/box-truck/ftl quote) first, then book immediately after.` }], isError: true };
+          return { content: [{ type: "text", text: `Cannot book: no quote found for ${quoteId} in this session. Quote ids are short-lived and rotate on every quote call. Run ltl_quote (or van/box-truck/ftl quote) first, then book immediately after.` }], isError: true };
         }
         const apiKey = WARP_API_KEY();
         if (!apiKey) {
@@ -805,16 +1080,16 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 5b. warp_batch_book ─────────────────────────────────────────
+  // ── 5b. batch_book ─────────────────────────────────────────
   // Book N already-quoted lanes in ONE tool call so a full spreadsheet of
   // priced lanes books as a single progress card instead of N noisy per-row
-  // warp_book calls. Sequential under the hood (every call charges a real
+  // book calls. Sequential under the hood (every call charges a real
   // card; a 402 stops the run so the user fixes the card once instead of
   // seeing the same error N times). Same auth + same per-quote session-cache
-  // guard as warp_book.
+  // guard as book.
   const batchBookTool = tool(
     "batch_book",
-    "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row). Use this after warp_batch_quote when the user says \"book all of them\" or \"book rows 1, 3, 5\" — do NOT call warp_book in a loop. Each row needs a quote_id (the same one warp_batch_quote returned for that row). Pickup/delivery default to the shared addresses at the top level so a single warehouse → many destinations only needs one address pair. Returns a progress card showing per-row Booked/Failed status with tracking numbers.",
+    "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row). Use this after batch_quote when the user says \"book all of them\" or \"book rows 1, 3, 5\" — do NOT call book in a loop. Each row needs a quote_id (the same one batch_quote returned for that row). Pickup/delivery default to the shared addresses at the top level so a single warehouse → many destinations only needs one address pair. Returns a progress card showing per-row Booked/Failed status with tracking numbers.",
     {
       bookings: z.array(
         z.object({
@@ -878,7 +1153,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           .filter(({ qid }) => !quoteAmountCache.has(qid));
         if (unknown.length > 0) {
           const sample = unknown.slice(0, 3).map((u) => `row ${u.i + 1} (${u.qid})`).join(", ");
-          return { content: [{ type: "text", text: `Cannot book: ${unknown.length} of ${rows.length} quote ids are not from this session (${sample}${unknown.length > 3 ? ", …" : ""}). Quote ids rotate on every quote call. Re-run warp_batch_quote and book immediately after.` }], isError: true };
+          return { content: [{ type: "text", text: `Cannot book: ${unknown.length} of ${rows.length} quote ids are not from this session (${sample}${unknown.length > 3 ? ", …" : ""}). Quote ids rotate on every quote call. Re-run batch_quote and book immediately after.` }], isError: true };
         }
 
         // Every row needs an effective pickup + delivery (per-row OR shared).
@@ -964,7 +1239,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   );
   batchBookTool?.update({ _meta: BATCH_BOOK_UI_META });
 
-  // ── 5c. warp_multistop_quote ────────────────────────────────────
+  // ── 5c. multistop_quote ────────────────────────────────────
   // One truck, one route, multiple stops. Removed in 0.5.68 (sparse
   // coverage), re-added in 0.14.0 against the canonical public endpoints
   // (POST /api/v1/multistop/{quote,book} — /api/v1/openapi.json,
@@ -972,14 +1247,14 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // route-dependent: un-priced routes answer "A rate has not yet been
   // determined", surfaced below as a clean no-coverage message.
 
-  // Session cache so warp_multistop_book can validate stop_index against the
+  // Session cache so multistop_book can validate stop_index against the
   // quoted stop sequence and fail fast on stale/foreign quote ids — same
   // pattern as quoteAmountCache for single-stop booking.
   const multistopRouteCache = new Map<string, { stops: string[]; totalCharge?: number }>();
 
   tool(
     "multistop_quote",
-    "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery). Use for milk runs, pool distribution, or multi-store replenishment on a single truck — for a simple A→B truckload use warp_ftl_quote. Auth required (free account). Coverage is route-dependent — not every route has a rate yet.",
+    "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery). Use for milk runs, pool distribution, or multi-store replenishment on a single truck — for a simple A→B truckload use ftl_quote. Auth required (free account). Coverage is route-dependent — not every route has a rate yet.",
     {
       pickup_zip: z.string().regex(/^\d{5}$/).describe("5-digit ZIP of the first pickup stop"),
       stop_zips: z.array(z.string().regex(/^\d{5}$/)).min(1).max(10).describe("5-digit ZIPs of the intermediate stops, in route order (at least 1)"),
@@ -1050,7 +1325,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
             zipcode: zip,
             role: i === 0 ? "pickup" : i === zips.length - 1 ? "delivery" : "transit",
           })),
-          _note: `Multi-stop quote ${quoteId}${typeof totalCharge === "number" ? ` — $${totalCharge}` : ""}. To book, call warp_multistop_book with one shipments[] leg per pickup→delivery pair, each leg's stop_index referencing the stop_sequence above.`,
+          _note: `Multi-stop quote ${quoteId}${typeof totalCharge === "number" ? ` — $${totalCharge}` : ""}. To book, call multistop_book with one shipments[] leg per pickup→delivery pair, each leg's stop_index referencing the stop_sequence above.`,
         };
         return { content: [{ type: "text", text: JSON.stringify(enriched, null, 2) }] };
       } catch (err) {
@@ -1072,10 +1347,10 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 5d. warp_multistop_book ─────────────────────────────────────
+  // ── 5d. multistop_book ─────────────────────────────────────
 
   const multistopStopSchema = z.object({
-    stop_index: z.number().int().min(0).describe("Index into the quoted stop sequence: 0 = first pickup, then intermediate stops in order, last = final delivery. warp_multistop_quote echoes the sequence as stop_sequence."),
+    stop_index: z.number().int().min(0).describe("Index into the quoted stop sequence: 0 = first pickup, then intermediate stops in order, last = final delivery. multistop_quote echoes the sequence as stop_sequence."),
     address: z.object({
       street: z.string().describe("Street address"),
       city: z.string().describe("City name"),
@@ -1106,9 +1381,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   tool(
     "multistop_book",
-    "Book a multi-stop FTL route quoted by warp_multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required.",
+    "Book a multi-stop FTL route quoted by multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required.",
     {
-      quote_id: z.string().describe("Quote ID from warp_multistop_quote (PRICING_MULTI_…). Use the id from your MOST RECENT quote — ids expire and rotate."),
+      quote_id: z.string().describe("Quote ID from multistop_quote (PRICING_MULTI_…). Use the id from your MOST RECENT quote — ids expire and rotate."),
       shipments: z.array(z.object({
         pickup_info: multistopStopSchema.describe("Where this leg's freight gets picked up"),
         delivery_info: multistopStopSchema.describe("Where this leg's freight gets dropped"),
@@ -1126,7 +1401,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const quoteId = params.quote_id as string;
         const cached = multistopRouteCache.get(quoteId);
         if (!cached) {
-          return { content: [{ type: "text", text: `Cannot book: no multi-stop quote found for ${quoteId} in this session. Quote ids are short-lived and rotate. Run warp_multistop_quote first, then book immediately after.` }], isError: true };
+          return { content: [{ type: "text", text: `Cannot book: no multi-stop quote found for ${quoteId} in this session. Quote ids are short-lived and rotate. Run multistop_quote first, then book immediately after.` }], isError: true };
         }
         // stop_index sanity against the quoted sequence — catches an
         // off-by-one before the gateway books the wrong stops. Freight can
@@ -1149,7 +1424,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           const m = errText(bookErr);
           const stale = /quote.*expired|quote.*not valid|quote.*superseded|quoteId is not valid/i.test(m);
           const reason = stale
-            ? `Booking failed: the quote has expired. Re-run warp_multistop_quote and book again immediately with the fresh id.`
+            ? `Booking failed: the quote has expired. Re-run multistop_quote and book again immediately with the fresh id.`
             : `Booking failed: ${m}`;
           return { content: [{ type: "text", text: reason }], isError: true };
         }
@@ -1194,7 +1469,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 6. warp_track ───────────────────────────────────────────────
+  // ── 6. track ───────────────────────────────────────────────
 
   tool(
     "track",
@@ -1245,7 +1520,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 8. warp_lane_history ────────────────────────────────────────
+  // ── 8. lane_history ────────────────────────────────────────
 
   tool(
     "lane_history",
@@ -1280,7 +1555,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 9. warp_list_bookings ───────────────────────────────────────
+  // ── 9. list_bookings ───────────────────────────────────────
 
   const listBookingsTool = tool(
     "list_bookings",
@@ -1319,7 +1594,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // Advertise the Claude / MCP Apps shipments card on the tool definition.
   listBookingsTool?.update({ _meta: BOOKINGS_UI_META });
 
-  // ── 11. warp_status ─────────────────────────────────────────────
+  // ── 11. status ─────────────────────────────────────────────
 
   tool(
     "status",
@@ -1369,13 +1644,13 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 12. warp_events ─────────────────────────────────────────────
+  // ── 12. events ─────────────────────────────────────────────
 
   tool(
     "events",
     "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries). Auth required.",
     {
-      shipment_id: z.string().describe("Shipment ID from warp_book response"),
+      shipment_id: z.string().describe("Shipment ID from book response"),
     },
     { title: "Get Shipment Events", readOnlyHint: true },
     async (params) => {
@@ -1407,7 +1682,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 13. warp_get_invoice ────────────────────────────────────────
+  // ── 13. get_invoice ────────────────────────────────────────
 
   tool(
     "get_invoice",
@@ -1445,7 +1720,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── 14. warp_get_documents ──────────────────────────────────────
+  // ── 14. get_documents ──────────────────────────────────────
 
   tool(
     "get_documents",
@@ -1486,7 +1761,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
 
 
-  // ── 15. warp_quote_history ──────────────────────────────────────────────────────
+  // ── 15. quote_history ──────────────────────────────────────────────────────
 
   tool(
     "quote_history",
@@ -1510,11 +1785,11 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_login ────────────────────────────────────────────────
+  // ── login ────────────────────────────────────────────────
 
   tool(
     "login",
-    "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if warp_payment_status says no key is configured.",
+    "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if payment_status says no key is configured.",
     {
       email: z.string().email().describe("Warp account email"),
       password: z.string().min(1).describe("Warp account password"),
@@ -1588,7 +1863,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_payment_status ───────────────────────────────────────
+  // ── payment_status ───────────────────────────────────────
 
   tool(
     "payment_status",
@@ -1617,7 +1892,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_analytics ─────────────────────────────────────────
+  // ── analytics ─────────────────────────────────────────
 
   tool(
     "analytics",
@@ -1634,7 +1909,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_locations ─────────────────────────────────────────
+  // ── locations ─────────────────────────────────────────
   tool(
     "locations",
     "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses. Auth required.",
@@ -1650,7 +1925,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_load_templates ────────────────────────────────────
+  // ── load_templates ────────────────────────────────────
   tool(
     "load_templates",
     "List the agent's saved load templates — reusable shipment configs (name, dims, weight, commodity). Recall one to quote/book a repeat kind of load without re-entering details. Auth required.",
@@ -1666,7 +1941,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_save_load_template ────────────────────────────────
+  // ── save_load_template ────────────────────────────────
   tool(
     "save_load_template",
     "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes. Auth required.",
@@ -1692,7 +1967,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
-  // ── warp_delete_load_template ──────────────────────────────
+  // ── delete_load_template ──────────────────────────────
   tool(
     "delete_load_template",
     "Delete a saved load template by its id (starts with lt_). Auth required.",

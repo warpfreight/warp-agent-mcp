@@ -34,37 +34,38 @@ transaction**, not just the lookup:
 
 ## What it does
 
-25 tools that let an AI agent talk to your Warp account:
+26 tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
-| `warp_van_quote` | Quote a 1–3 pallet cargo van shipment |
-| `warp_box_truck_quote` | Quote a 1–12 pallet box truck shipment |
-| `warp_ftl_quote` | Quote a full truckload (53' dry van) |
-| `warp_ltl_quote` | Quote LTL — Warp's flagship freight product |
-| `warp_ltl_market_options` | Multi-carrier LTL comparison - 30+ carriers ranked by price |
-| `warp_batch_quote` | Quote many lanes in one call (a whole spreadsheet / CSV) |
-| `warp_book` | Book any quote by id, with pickup + delivery addresses |
-| `warp_batch_book` | Book many already-quoted lanes in one call |
-| `warp_multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
-| `warp_multistop_book` | Book a quoted multi-stop route as per-leg shipments |
-| `warp_track` | Track a shipment by id or order id |
-| `warp_events` | Full tracking event timeline for a shipment |
-| `warp_lane_history` | Past shipments on your lanes |
-| `warp_list_bookings` | List recent bookings |
-| `warp_quote_history` | List recent quotes across all sessions |
-| `warp_locations` | List your saved pickup/delivery locations |
-| `warp_load_templates` | List your saved reusable load configurations |
-| `warp_save_load_template` | Save a reusable load configuration (weight + dims + class) |
-| `warp_delete_load_template` | Delete a saved load template by id |
-| `warp_get_invoice` | Invoice for a delivered shipment |
-| `warp_get_documents` | Shipment documents (BOL, POD, customs) |
-| `warp_login` | Log in from inside the MCP, no portal visit needed |
-| `warp_payment_status` | Check whether a card is on file |
-| `warp_status` | API health + key validity check |
-| `warp_analytics` | Bookings + revenue rollup by source |
+| `mode_compare` | **Start here.** Compare every eligible mode (van/box truck/LTL/FTL) in one parallel call and get a decision-complete recommendation with the trade-off math |
+| `van_quote` | Quote a 1–3 pallet cargo van shipment |
+| `box_truck_quote` | Quote a 1–12 pallet box truck shipment |
+| `ftl_quote` | Quote a full truckload (53' dry van) |
+| `ltl_quote` | Quote LTL — Warp's flagship freight product |
+| `ltl_market_options` | Multi-carrier LTL comparison - 30+ carriers ranked by price |
+| `batch_quote` | Quote many lanes in one call (a whole spreadsheet / CSV) |
+| `book` | Book any quote by id, with pickup + delivery addresses |
+| `batch_book` | Book many already-quoted lanes in one call |
+| `multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
+| `multistop_book` | Book a quoted multi-stop route as per-leg shipments |
+| `track` | Track a shipment by id or order id |
+| `events` | Full tracking event timeline for a shipment |
+| `lane_history` | Past shipments on your lanes |
+| `list_bookings` | List recent bookings |
+| `quote_history` | List recent quotes across all sessions |
+| `locations` | List your saved pickup/delivery locations |
+| `load_templates` | List your saved reusable load configurations |
+| `save_load_template` | Save a reusable load configuration (weight + dims + class) |
+| `delete_load_template` | Delete a saved load template by id |
+| `get_invoice` | Invoice for a delivered shipment |
+| `get_documents` | Shipment documents (BOL, POD, customs) |
+| `login` | Log in from inside the MCP, no portal visit needed |
+| `payment_status` | Check whether a card is on file |
+| `status` | API health + key validity check |
+| `analytics` | Bookings + revenue rollup by source |
 
-_Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one). `warp_multistop_quote` + `warp_multistop_book` were also removed in 0.5.68 and re-added in 0.14.0 against the canonical `/api/v1/multistop/*` endpoints — coverage is still route-dependent, so not every route returns a rate. Contact support@wearewarp.com if you need either of the removed tools._
+_Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one). `multistop_quote` + `multistop_book` were also removed in 0.5.68 and re-added in 0.14.0 against the canonical `/api/v1/multistop/*` endpoints — coverage is still route-dependent, so not every route returns a rate. Contact support@wearewarp.com if you need either of the removed tools._
 
 ## Install
 

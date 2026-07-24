@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Hermetic regression guard for warp_book's failure handling under the
+ * Hermetic regression guard for book's failure handling under the
  * server-side payment model (0.6.0+).
  *
- * No network, no API key, no real money: drives the REAL warp_book handler
+ * No network, no API key, no real money: drives the REAL book handler
  * from dist/tools.js with a stub client whose book() throws, plus a stub
  * global.fetch that records any call to /agents/charge-me or /agents/refund-me.
  *
  * Booking is now atomic server-side: POST /api/v1/book charges the saved card,
  * books upstream, and refunds the charge itself if the booking fails. The MCP
  * must therefore NOT charge or refund client-side — doing so would double-charge.
- * So on a book failure this asserts that warp_book:
+ * So on a book failure this asserts that book:
  *   1. returns a clean isError result (not a crash),
  *   2. actually reached client.book() (got past the re-quote guard),
  *   3. surfaces an actionable message (here: stale quote → "expired"), and
@@ -29,7 +29,7 @@ globalThis.fetch = async (url, opts) => {
   const u = String(url);
   const body = opts?.body ? JSON.parse(opts.body) : {};
   calls.push({ url: u, body });
-  // Tripwires: a 0.6.0+ warp_book must never hit these. If it does, the
+  // Tripwires: a 0.6.0+ book must never hit these. If it does, the
   // assertions below catch it (the recorded call proves a client-side charge/refund).
   if (u.includes("/agents/charge-me"))
     return new Response(JSON.stringify({ payment_intent_id: "pi_live_FAKE123", status: "succeeded" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -41,18 +41,24 @@ globalThis.fetch = async (url, opts) => {
 const handlers = {};
 // McpServer.tool() has 3/4/5-arg overloads; the handler is always the LAST arg
 // (a 5th annotations object — { title, readOnlyHint } — sits before it on quote tools).
-const fakeServer = { tool: (name, ...rest) => { handlers[name] = rest[rest.length - 1]; } };
+// tools.ts wraps registration in a local tool() helper that calls
+// server.registerTool(name, config, handler) so each tool gets a display title.
+// The stub must implement BOTH shapes or registerTools() throws on import.
+const fakeServer = {
+  tool: (name, ...rest) => { handlers[name] = rest[rest.length - 1]; },
+  registerTool: (name, _config, handler) => { handlers[name] = handler; },
+};
 const clientStub = {
   ltlQuote: async () => ({ warp_quote_id: "PRICING_STALE", warp_price: 123.45, options: [] }),
   book: async () => { throw new WarpApiError(400, { message: "quoteId is not valid" }); },
 };
 registerTools(fakeServer, clientStub, () => "wak_live_FAKEKEY1234567890");
 
-console.log("== warp_book failure handling (server-side payment model) ==");
-// Seed the session amount-cache the way a real quote would, so warp_book gets
+console.log("== book failure handling (server-side payment model) ==");
+// Seed the session amount-cache the way a real quote would, so book gets
 // past its "re-quote first" guard and actually calls client.book().
-await handlers["warp_ltl_quote"]({ origin_zip: "90007", destination_zip: "90038", pickup_date: "2099-01-01", pallets: 1, weight_lbs_per_pallet: 500 });
-const b = await handlers["warp_book"]({
+await handlers["ltl_quote"]({ origin_zip: "90007", destination_zip: "90038", pickup_date: "2099-01-01", pallets: 1, weight_lbs_per_pallet: 500 });
+const b = await handlers["book"]({
   quote_id: "PRICING_STALE",
   pickup:   { zipCode: "90007", city: "LA", state: "CA", street: "1 A St", contactName: "T", phone: "3105551234", email: "x@y.com" },
   delivery: { zipCode: "90038", city: "LA", state: "CA", street: "2 B St", contactName: "R", phone: "3105551234" },

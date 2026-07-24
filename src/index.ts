@@ -136,7 +136,7 @@ const server = new McpServer(
     instructions: [
       "Warp freight quoting and booking over MCP.",
       "",
-      "COMPARE MODES — DON'T PRE-PICK ONE. The same palletized load can usually move several ways (cargo van / 26' box truck / LTL / FTL) at very different prices. When the user asks for a quote, the cheapest option, or how to ship, quote every plausible mode and present them together, cheapest valid option first. Quoting only one mode (e.g. box truck) and skipping the others hides cheaper options — this is the most common and costly mistake.",
+      "COMPARE MODES — USE `mode_compare`. The same palletized load can usually move several ways (cargo van / 26' box truck / LTL / FTL) at very different prices. When the user asks for a quote, the cheapest option, or how to ship, call `mode_compare` — ONE call that prices every mode the load can legally ride, in parallel, and returns the recommended mode with a bookable quote id and the cost-vs-transit trade-off already calculated. Quoting a single mode and skipping the others hides cheaper options — this is the most common and costly mistake, and `mode_compare` exists so it can't happen. Reach for the individual quote tools (`ltl_quote`, `ftl_quote`, `van_quote`, `box_truck_quote`) only when the user has already fixed the mode.",
       "",
       "DON'T GATE A QUOTE BEHIND DIMENSIONS. If the user hasn't given pallet length/width/height, call ltl_quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) and returns an instant price. Do NOT block on asking for dims; quote first, then pass real dims for an exact rate when the user has them or wants a locked LTL price.",
       "",

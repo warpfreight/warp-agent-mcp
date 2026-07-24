@@ -11,7 +11,7 @@
  *
  * What it does NOT do:
  *   - Book any freight (would charge real money). Booking is exercised against
- *     the warp_book schema validator only.
+ *     the book schema validator only.
  *
  * Required env:
  *   WARP_API_KEY  — a wak_test_* sandbox key. Live keys also work but the
@@ -29,35 +29,36 @@ const RUN_MJS = join(__dirname, "..", "scripts", "run.mjs");
 // Tools the MCP MUST expose. Tests fail if any are missing or extra.
 // Reduced from 20 → 16 in 0.5.68 — removed warp_cancel (Warp blocks self-cancel),
 // warp_rate_card (account-state, AuthorizationRequired for fresh accounts),
-// warp_multistop_quote + warp_multistop_book (sparse backend lane coverage).
+// multistop_quote + multistop_book (sparse backend lane coverage).
 // Multistop re-added in 0.14.0 against the canonical /api/v1/multistop/*
 // endpoints (coverage still route-dependent, surfaced as a clean message).
 const EXPECTED_TOOLS = [
-  "warp_analytics",
-  "warp_batch_book",
-  "warp_batch_quote",
-  "warp_book",
-  "warp_box_truck_quote",
-  "warp_delete_load_template",
-  "warp_events",
-  "warp_ftl_quote",
-  "warp_get_documents",
-  "warp_get_invoice",
-  "warp_lane_history",
-  "warp_list_bookings",
-  "warp_load_templates",
-  "warp_locations",
-  "warp_login",
-  "warp_ltl_market_options",
-  "warp_ltl_quote",
-  "warp_multistop_book",
-  "warp_multistop_quote",
-  "warp_payment_status",
-  "warp_quote_history",
-  "warp_save_load_template",
-  "warp_status",
-  "warp_track",
-  "warp_van_quote",
+  "analytics",
+  "batch_book",
+  "batch_quote",
+  "book",
+  "box_truck_quote",
+  "delete_load_template",
+  "events",
+  "ftl_quote",
+  "get_documents",
+  "get_invoice",
+  "lane_history",
+  "list_bookings",
+  "load_templates",
+  "locations",
+  "login",
+  "ltl_market_options",
+  "ltl_quote",
+  "mode_compare",
+  "multistop_book",
+  "multistop_quote",
+  "payment_status",
+  "quote_history",
+  "save_load_template",
+  "status",
+  "track",
+  "van_quote",
 ];
 
 function resolveKey() {
@@ -168,13 +169,13 @@ async function main() {
     }
   }
 
-  // ── Regression: warp_book pickup + delivery must advertise as full
+  // ── Regression: book pickup + delivery must advertise as full
   //    object schemas, never a $ref or untyped node. A shared Zod instance
   //    used to emit delivery as "$ref: #/properties/pickup", which MCP
   //    clients serialized as a string → "Expected object, received string"
   //    and bookings on new lanes were impossible. (Reported 2026-05.)
-  console.log("\n== warp_book delivery schema (regression guard) ==");
-  const bookTool = (list.result?.tools ?? []).find((t) => t.name === "warp_book");
+  console.log("\n== book delivery schema (regression guard) ==");
+  const bookTool = (list.result?.tools ?? []).find((t) => t.name === "book");
   const props = bookTool?.inputSchema?.properties ?? {};
   expect("pickup advertised as type:object", props.pickup?.type === "object");
   expect("delivery advertised as type:object", props.delivery?.type === "object");
@@ -188,37 +189,37 @@ async function main() {
       !props.delivery.required.includes("email"),
   );
   expect(
-    "warp_book inputSchema contains no $ref (clients can't dereference)",
+    "book inputSchema contains no $ref (clients can't dereference)",
     !JSON.stringify(bookTool?.inputSchema ?? {}).includes("$ref"),
   );
 
-  // ── warp_status ─────────────────────────────────────────────────
-  console.log("\n== warp_status ==");
-  const status = await call("tools/call", { name: "warp_status", arguments: {} });
+  // ── status ─────────────────────────────────────────────────
+  console.log("\n== status ==");
+  const status = await call("tools/call", { name: "status", arguments: {} });
   const statusBody = JSON.parse(status.result?.content?.[0]?.text ?? "{}");
   expect("status returns api version", statusBody.api === "v1");
   expect("status returns commit", typeof statusBody.commit === "string");
 
-  // ── warp_payment_status ────────────────────────────────────────
-  console.log("\n== warp_payment_status ==");
-  const pay = await call("tools/call", { name: "warp_payment_status", arguments: {} });
+  // ── payment_status ────────────────────────────────────────
+  console.log("\n== payment_status ==");
+  const pay = await call("tools/call", { name: "payment_status", arguments: {} });
   const payBody = JSON.parse(pay.result?.content?.[0]?.text ?? "{}");
   expect("payment_status returns has_card boolean", typeof payBody.has_card === "boolean");
 
-  // ── warp_ftl_quote ──────────────────────────────────────────────
-  console.log("\n== warp_ftl_quote (public endpoint, no auth needed) ==");
+  // ── ftl_quote ──────────────────────────────────────────────
+  console.log("\n== ftl_quote (public endpoint, no auth needed) ==");
   const ftl = await call("tools/call", {
-    name: "warp_ftl_quote",
+    name: "ftl_quote",
     arguments: { origin_zip: "90007", destination_zip: "90038", pickup_date: futureDate() },
   });
   const ftlBody = JSON.parse(ftl.result?.content?.[0]?.text ?? "{}");
   expect("ftl quote returns warp_quote_id", typeof ftlBody.warp_quote_id === "string");
   expect("ftl quote returns warp_price > 0", typeof ftlBody.warp_price === "number" && ftlBody.warp_price > 0);
 
-  // ── warp_ltl_quote ──────────────────────────────────────────────
-  console.log("\n== warp_ltl_quote ==");
+  // ── ltl_quote ──────────────────────────────────────────────
+  console.log("\n== ltl_quote ==");
   const ltl = await call("tools/call", {
-    name: "warp_ltl_quote",
+    name: "ltl_quote",
     arguments: {
       origin_zip: "90007",
       destination_zip: "90038",
@@ -235,16 +236,16 @@ async function main() {
   const ltlBody = JSON.parse(ltl.result?.content?.[0]?.text ?? "{}");
   expect("ltl quote returns warp_quote_id", typeof ltlBody.warp_quote_id === "string");
 
-  // ── warp_quote_history ─────────────────────────────────────────
-  console.log("\n== warp_quote_history ==");
-  const history = await call("tools/call", { name: "warp_quote_history", arguments: {} });
+  // ── quote_history ─────────────────────────────────────────
+  console.log("\n== quote_history ==");
+  const history = await call("tools/call", { name: "quote_history", arguments: {} });
   const histBody = JSON.parse(history.result?.content?.[0]?.text ?? "[]");
   expect("quote_history returns array", Array.isArray(histBody));
 
-  // ── warp_book schema validation (no real book) ─────────────────
-  console.log("\n== warp_book input validation (no actual booking) ==");
+  // ── book schema validation (no real book) ─────────────────
+  console.log("\n== book input validation (no actual booking) ==");
   const badBook = await call("tools/call", {
-    name: "warp_book",
+    name: "book",
     arguments: { quote_id: "NOT_REAL_ID" }, // missing required pickup/delivery on lanes with no default
   });
   // Either it tells us to quote first, or fails validation cleanly. Both prove the tool is wired.
