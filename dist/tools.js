@@ -546,7 +546,7 @@ export function registerTools(server, client, getApiKey) {
         }
         return String(body ?? "no rate returned").slice(0, 160);
     };
-    tool("mode_compare", "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Compares EVERY freight mode the load can legally ride (cargo van / 26' box truck / LTL / FTL) in ONE parallel call and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — mode eligibility and the cost-per-day-saved math are computed server-side, so the cheapest valid option can't be missed. Dims are optional (a standard 48x40x48 pallet is assumed). Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.", {
+    tool("mode_compare", "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Compares EVERY freight mode the load can legally ride (cargo van / 26' box truck / LTL / FTL) in ONE parallel call and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — mode eligibility and the cost-per-day-saved math are computed server-side, so the cheapest valid option can't be missed. Dims are optional (a standard 48x40x48 pallet is assumed). Set benchmark_market:true to also rank Warp's rate against the live 30+ carrier market for the lane (adds ~15-25s) — that makes the answer decision-complete: the right mode AND whether the price is actually good. Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.", {
         origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
         destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
         pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) })).describe("Pickup date YYYY-MM-DD"),
@@ -562,6 +562,7 @@ export function registerTools(server, client, getApiKey) {
         pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
         delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
         priority: z.enum(["cheapest", "fastest"]).optional().describe("What to optimize the recommendation for. Defaults to 'cheapest'."),
+        benchmark_market: z.boolean().optional().describe("Also benchmark Warp's rate against the live 30+ carrier LTL market for this lane. Makes the answer decision-complete (is this rate actually good?) but costs ~15-25s — the mode comparison alone returns in ~1-2s. Defaults to false."),
     }, { title: "Compare Freight Modes", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
@@ -608,7 +609,17 @@ export function registerTools(server, client, getApiKey) {
                     return client.ftlQuote(p);
                 return client.ltlQuote(p);
             };
-            const settled = await Promise.allSettled(eligible.map((m) => quoteFor(m)));
+            // Optional lane benchmark. Fired CONCURRENTLY with the mode quotes so the
+            // total is max(modes, spread) — never the sum. Opt-in because the carrier
+            // poll runs ~15-25s while the mode comparison alone lands in ~1-2s; a
+            // caller that wants the fast answer must not pay for the slow one.
+            const wantBenchmark = params.benchmark_market === true;
+            const [settled, marketRows] = await Promise.all([
+                Promise.allSettled(eligible.map((m) => quoteFor(m))),
+                wantBenchmark
+                    ? client.ltlMarketOptions(params).catch(() => [])
+                    : Promise.resolve([]),
+            ]);
             const priced = [];
             settled.forEach((outcome, i) => {
                 const mode = eligible[i];
@@ -688,9 +699,45 @@ export function registerTools(server, client, getApiKey) {
                         ? `${winner.mode_label} is ${usd(savings)} cheaper than ${fastest.mode_label} with no transit penalty.`
                         : `${winner.mode_label} is the cheapest option at ${usd(winner.price_usd)}.`;
             }
+            // Benchmark Warp's own rate against the live carrier market for this lane.
+            // Reported straight, including when Warp is NOT the cheapest — an honest
+            // benchmark is the whole point, and a rigged one dies the first time a
+            // shipper checks it. LTL is the basis when priced (the spread is LTL
+            // carriers); otherwise we benchmark the winner and say so.
+            const ltlPriced = priced.find((p) => p.mode === "ltl");
+            const basis = ltlPriced ?? winner;
+            const competitors = marketRows
+                .filter((o) => o && o.is_warp !== true && typeof o.price_usd === "number");
+            let market_benchmark = null;
+            if (wantBenchmark && competitors.length) {
+                const prices = competitors.map((o) => o.price_usd).sort((a, b) => a - b);
+                const cheapest = prices[0];
+                const median = prices[Math.floor(prices.length / 2)];
+                const cheapestRow = competitors.find((o) => o.price_usd === cheapest);
+                const beating = prices.filter((p) => p < basis.price_usd).length;
+                const round2 = (n) => Math.round(n * 100) / 100;
+                market_benchmark = {
+                    basis_mode: basis.mode,
+                    warp_price_usd: basis.price_usd,
+                    carriers_compared: competitors.length,
+                    cheapest_competitor: typeof cheapestRow?.carrier_name === "string" ? cheapestRow.carrier_name : null,
+                    cheapest_competitor_usd: cheapest,
+                    median_competitor_usd: median,
+                    carriers_cheaper_than_warp: beating,
+                    vs_cheapest_usd: round2(cheapest - basis.price_usd),
+                    vs_median_usd: round2(median - basis.price_usd),
+                    verdict: beating === 0
+                        ? `Warp is the cheapest of ${competitors.length + 1} rates priced on this lane, ${usd(cheapest - basis.price_usd)} below the next carrier (${typeof cheapestRow?.carrier_name === "string" ? cheapestRow.carrier_name : "unnamed"}) and ${usd(median - basis.price_usd)} below the market median.`
+                        : `${beating} of ${competitors.length} carriers price below Warp on this lane (cheapest ${typeof cheapestRow?.carrier_name === "string" ? cheapestRow.carrier_name : "unnamed"} at ${usd(cheapest)}); Warp is ${usd(Math.abs(median - basis.price_usd))} ${median > basis.price_usd ? "below" : "above"} the market median.`,
+                };
+            }
+            else if (wantBenchmark) {
+                market_benchmark = { unavailable: "The carrier market sweep returned no comparable rates for this lane (it times out intermittently). The mode comparison above is unaffected — re-run to retry the benchmark." };
+            }
             const summary = [
                 `${winner.mode_label} — ${usd(winner.price_usd)}${winner.transit_days ? `, ${winner.transit_days} day${winner.transit_days === 1 ? "" : "s"}` : ""}${winner.delivery_date ? `, delivers ${winner.delivery_date}` : ""}`,
                 why,
+                market_benchmark && typeof market_benchmark.verdict === "string" ? `Market: ${market_benchmark.verdict}` : "",
                 rest.length ? `Alternatives: ${rest.map((r) => `${r.mode_label} ${usd(r.price_usd)}${r.transit_days ? `/${r.transit_days}d` : ""}`).join(" · ")}` : "",
                 unavailable.length ? `Not available: ${unavailable.map((u) => u.mode_label).join(", ")}` : "",
                 `Quote id ${winner.quote_id} — booking requires explicit confirmation.`,
@@ -707,6 +754,7 @@ export function registerTools(server, client, getApiKey) {
                 recommended: { ...winner, why },
                 alternatives: rest,
                 unavailable,
+                market_benchmark,
                 priced_modes: priced.length,
                 compared_modes: eligible.length,
                 elapsed_ms: Date.now() - start,
