@@ -123,6 +123,17 @@ export class WarpClient {
         // Default to a standard 48x40x48 pallet when dims are omitted, so a dims-less
         // quote returns a price (FAK, standard pallet) instead of MISSING_DIMS — the
         // behavior the tools advertise. Callers pass real dims for an exact rate.
+        //
+        // ⚠ This convenience MUST be disclosed, never presented as fact. warp-site
+        // requires dims and 400s MISSING_DIMS without them precisely because LTL
+        // prices OFF the dimensions — measured on 90021→60609, 6 plt @800 lb:
+        // 48x40x48 = $2,212.10 but 48x40x96 = $6,202.17 (~2.8x) — while the route
+        // still reports quote_tier "firm" because, from its side, dims were supplied.
+        // Injecting dims here therefore turns an honest "indicative, dims missing"
+        // into a confident "firm" on a pallet size WE invented. `_selfServeQuote`
+        // below detects that and downgrades + discloses. Van/box-truck/FTL are
+        // vehicle-priced (verified: identical rate at 48in and 96in), so the
+        // assumption is harmless there and is reported without a tier change.
         if (body.length_in === undefined)
             body.length_in = 48;
         if (body.width_in === undefined)
@@ -137,6 +148,15 @@ export class WarpClient {
         return body;
     }
     async _selfServeQuote(mode, params) {
+        // Which dimensions did the CALLER actually give us, vs which did we invent
+        // in buildQuoteBody? Read the raw params before the body is built.
+        const assumedDimFields = ["length_in", "width_in", "height_in"]
+            .filter((k) => !(Number(params[k]) > 0));
+        const dimsAssumed = assumedDimFields.length > 0;
+        // LTL is the only mode whose price moves with dimensions (van/box-truck/FTL
+        // buy a vehicle, so a taller pallet costs the same). Only there does an
+        // assumed pallet make the quote genuinely un-firm.
+        const dimsAffectPrice = mode === "ltl";
         const key = this.getApiKey();
         const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
         const body = this.buildQuoteBody(params);
@@ -188,16 +208,33 @@ export class WarpClient {
                 pickup_date: data.pickup_date,
                 delivery_date: data.delivery_date,
                 expires_at: data.expires_at,
-                quote_tier: data.quote_tier,
+                // A quote priced on dims WE invented is never "firm". Downgrade to the
+                // route's own vocabulary ("indicative") and put the assumed dims back on
+                // the missing list, so a caller can't read `firm` + `missing_for_ship: []`
+                // and present an invented price as settled.
+                quote_tier: dimsAssumed && dimsAffectPrice ? "indicative" : data.quote_tier,
                 service: data.service,
                 assumptions: data.assumptions,
-                missing_for_ship: data.missing_for_ship,
+                missing_for_ship: dimsAssumed && dimsAffectPrice
+                    ? Array.from(new Set([
+                        ...(Array.isArray(data.missing_for_ship) ? data.missing_for_ship : []),
+                        ...assumedDimFields,
+                    ]))
+                    : data.missing_for_ship,
                 booking_url: data.booking_url,
                 book_tool_call: data.book_tool_call,
                 payment_ready: data.payment_ready,
             } : {}),
+            // Always state whether the pallet size was the caller's or ours.
+            dims_assumed: dimsAssumed,
+            ...(dimsAssumed ? {
+                dims_assumed_fields: assumedDimFields,
+                dims_disclosure: dimsAffectPrice
+                    ? `Priced on an ASSUMED standard 48x40x48 in pallet — ${assumedDimFields.join(", ")} not provided. LTL price is driven by pallet size, especially HEIGHT: a taller pallet can cost several times more on the same lane. Treat this as indicative and send length_in/width_in/height_in for a firm price.`
+                    : `Dimensions were assumed (standard 48x40x48 in pallet), but ${mode.toUpperCase()} is priced per vehicle, so the rate does not change with pallet size.`,
+            } : {}),
             _note: hasQuote
-                ? `Warp ${mode.toUpperCase()} quote_id: ${quoteId} — use this id with warp_book to book`
+                ? `Warp ${mode.toUpperCase()} quote_id: ${quoteId} — use this id with \`book\` to book${dimsAssumed && dimsAffectPrice ? " (INDICATIVE: pallet dimensions were assumed, not supplied)" : ""}`
                 : `No Warp coverage on this lane (${originZip} → ${destZip}). ${data.error ?? ""}`,
         };
     }

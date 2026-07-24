@@ -621,6 +621,10 @@ export function registerTools(server, client, getApiKey) {
                     : Promise.resolve([]),
             ]);
             const priced = [];
+            // Keyed BY MODE, not first-seen: the disclosure is mode-specific ("LTL
+            // prices off size" vs "VAN is per-vehicle"), so showing another mode's
+            // text next to the winner would state the opposite of the truth.
+            const disclosureByMode = new Map();
             settled.forEach((outcome, i) => {
                 const mode = eligible[i];
                 const label = MODE_LABELS[mode];
@@ -651,7 +655,15 @@ export function registerTools(server, client, getApiKey) {
                     quote_id: quoteId,
                     expires_at: data.expires_at ?? null,
                     booking_url: data.booking_url ?? null,
+                    quote_tier: data.quote_tier ?? null,
+                    missing_for_ship: Array.isArray(data.missing_for_ship) ? data.missing_for_ship : [],
                 });
+                // The quote route tells us what it still needs and what we assumed on
+                // the caller's behalf, so the answer can never present an invented
+                // pallet size as a settled price.
+                if (typeof data.dims_disclosure === "string") {
+                    disclosureByMode.set(mode, data.dims_disclosure);
+                }
             });
             // 3. Rank. Unknown transit sorts last on the "fastest" axis rather than
             //    pretending to be instant.
@@ -734,8 +746,14 @@ export function registerTools(server, client, getApiKey) {
             else if (wantBenchmark) {
                 market_benchmark = { unavailable: "The carrier market sweep returned no comparable rates for this lane (it times out intermittently). The mode comparison above is unaffected — re-run to retry the benchmark." };
             }
+            // Label the headline honestly. An indicative price priced on a pallet we
+            // invented must never read like a settled number the customer can rely on.
+            const indicative = winner.quote_tier === "indicative";
+            const dimsDisclosure = disclosureByMode.get(winner.mode) ?? "";
             const summary = [
-                `${winner.mode_label} — ${usd(winner.price_usd)}${winner.transit_days ? `, ${winner.transit_days} day${winner.transit_days === 1 ? "" : "s"}` : ""}${winner.delivery_date ? `, delivers ${winner.delivery_date}` : ""}`,
+                `${winner.mode_label} — ${usd(winner.price_usd)}${winner.transit_days ? `, ${winner.transit_days} day${winner.transit_days === 1 ? "" : "s"}` : ""}${winner.delivery_date ? `, delivers ${winner.delivery_date}` : ""}${indicative ? "   [INDICATIVE — not a firm price]" : ""}`,
+                dimsDisclosure,
+                winner.missing_for_ship.length ? `Still needed for a firm price: ${winner.missing_for_ship.join(", ")}.` : "",
                 why,
                 market_benchmark && typeof market_benchmark.verdict === "string" ? `Market: ${market_benchmark.verdict}` : "",
                 rest.length ? `Alternatives: ${rest.map((r) => `${r.mode_label} ${usd(r.price_usd)}${r.transit_days ? `/${r.transit_days}d` : ""}`).join(" · ")}` : "",
@@ -748,8 +766,12 @@ export function registerTools(server, client, getApiKey) {
                     pallets, weight_lbs_per_pallet: weightPer, total_weight_lbs: totalWeight,
                     dims_in: { length: params.length_in ?? 48, width: params.width_in ?? 40, height: params.height_in ?? 48 },
                     dims_assumed: params.length_in === undefined || params.width_in === undefined || params.height_in === undefined,
+                    dims_disclosure: dimsDisclosure || null,
                     commodity: params.commodity ?? null,
                 },
+                quote_tier: winner.quote_tier,
+                is_firm: winner.quote_tier === "firm",
+                missing_for_firm_price: winner.missing_for_ship,
                 priority,
                 recommended: { ...winner, why },
                 alternatives: rest,
