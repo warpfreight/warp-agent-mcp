@@ -1,3 +1,9 @@
+import {
+  WARP_TOKENS_CSS,
+  FORKLIFT_CSS,
+  FORKLIFT_HTML,
+  FORKLIFT_JS,
+} from "./warp-theme.js";
 // Inline batch-book widget for Warp MCP.
 //
 // warp_batch_book confirms (or fails) N bookings in one call, sequentially.
@@ -102,26 +108,8 @@ export function toBatchBookWidgetData(
 
 // Theme-adaptive card chrome (same palette as batch-quote-card / bookings-card).
 const CARD_CSS = `
-:root {
-  --card: #ffffff; --line: #eceae3; --line2: #f3f1ec;
-  --text: #1c1b19; --muted: #6f7480; --dim: #9a9ea6;
-  --accent: #15803d; --accent-soft: rgba(21,128,61,0.10); --warp-tint: rgba(21,128,61,0.045);
-  --icon-bg: #f1f0ec; --icon-text: #5b6068; --logo: #15803d; --shadow: 0 1px 3px rgba(0,0,0,0.05);
-  --pill-bg: #f1f0ec; --pill-text: #5b6068;
-  --bad: #b91c1c; --bad-bg: rgba(185,28,28,0.10);
-  --link: #15803d;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --card: #1b1b1d; --line: #2f2f32; --line2: #262629;
-    --text: #ececed; --muted: #9a9aa2; --dim: #71717a;
-    --accent: #3EE07F; --accent-soft: rgba(62,224,127,0.14); --warp-tint: rgba(62,224,127,0.06);
-    --icon-bg: #27272a; --icon-text: #b6b6bd; --logo: #00FF33; --shadow: 0 1px 3px rgba(0,0,0,0.25);
-    --pill-bg: #27272a; --pill-text: #b6b6bd;
-    --bad: #f87171; --bad-bg: rgba(248,113,113,0.14);
-    --link: #3EE07F;
-  }
-}
+${WARP_TOKENS_CSS}
+${FORKLIFT_CSS}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; background: transparent; color: var(--text);
@@ -187,6 +175,7 @@ html, body {
 const CARD_BODY = `<div class="warp-root" id="__warp_bb_root"></div>`;
 
 const RENDER_FN_JS = `
+var FORKLIFT_SLOT = ${JSON.stringify(FORKLIFT_HTML)};
 window.__warpToggleBookRow = function(idx) {
   var item = document.getElementById("__warp_bb_item_" + idx);
   if (!item) return;
@@ -202,7 +191,7 @@ window.__warpRenderBatchBook = function(data) {
 
   var SEP = ' &#183; ';
   var h = '<div class="wcard">';
-  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span></div>';
+  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span>' + FORKLIFT_SLOT + '</div>';
 
   var sub = data.total + (data.total===1?' shipment':' shipments')
     + (data.succeeded>0 ? SEP + data.succeeded + ' booked' : '')
@@ -267,6 +256,7 @@ window.__warpRenderBatchBook = function(data) {
   h += '<div class="wm-foot">Click a row for tracking &amp; details</div>';
   h += '</div>'; // card
   root.innerHTML = h;
+  try { if (window.__warpForklift) window.__warpForklift(); } catch (e) {}
 
   // Delegated click — CSP-safe, no inline onclick. Ignore clicks on links so
   // the Track link doesn't also toggle the row.
@@ -315,6 +305,7 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
+<script>${FORKLIFT_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>

@@ -1,3 +1,9 @@
+import {
+  WARP_TOKENS_CSS,
+  FORKLIFT_CSS,
+  FORKLIFT_HTML,
+  FORKLIFT_JS,
+} from "./warp-theme.js";
 // Inline bookings/shipments widget for Warp MCP — a mini-TMS card.
 //
 // warp_list_bookings returns a list of shipments; this renders them as a single
@@ -189,28 +195,8 @@ export function toBookingsWidgetData(response: unknown): BookingsWidgetData | nu
 // Reuses the quote-card palette + card chrome (same CSS variables), plus
 // shipment-row + expandable-detail styling. Transparent page, theme-adaptive.
 const CARD_CSS = `
-:root {
-  --card: #ffffff; --line: #eceae3; --line2: #f3f1ec;
-  --text: #1c1b19; --muted: #6f7480; --dim: #9a9ea6;
-  --accent: #15803d; --accent-soft: rgba(21,128,61,0.10); --warp-tint: rgba(21,128,61,0.045);
-  --icon-bg: #f1f0ec; --icon-text: #5b6068; --logo: #15803d; --shadow: 0 1px 3px rgba(0,0,0,0.05);
-  --pill-bg: #f1f0ec; --pill-text: #5b6068;
-  --ok: #15803d; --ok-bg: rgba(21,128,61,0.10);
-  --warn: #b45309; --warn-bg: rgba(180,83,9,0.10);
-  --bad: #b91c1c; --bad-bg: rgba(185,28,28,0.10);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --card: #1b1b1d; --line: #2f2f32; --line2: #262629;
-    --text: #ececed; --muted: #9a9aa2; --dim: #71717a;
-    --accent: #3EE07F; --accent-soft: rgba(62,224,127,0.14); --warp-tint: rgba(62,224,127,0.06);
-    --icon-bg: #27272a; --icon-text: #b6b6bd; --logo: #00FF33; --shadow: 0 1px 3px rgba(0,0,0,0.25);
-    --pill-bg: #27272a; --pill-text: #b6b6bd;
-    --ok: #3EE07F; --ok-bg: rgba(62,224,127,0.14);
-    --warn: #fbbf24; --warn-bg: rgba(251,191,36,0.14);
-    --bad: #f87171; --bad-bg: rgba(248,113,113,0.14);
-  }
-}
+${WARP_TOKENS_CSS}
+${FORKLIFT_CSS}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; background: transparent; color: var(--text);
@@ -289,6 +275,7 @@ const CARD_BODY = `<div class="warp-root" id="__warp_bk_root"></div>`;
 // Shared painter — builds the bookings card DOM. One definition; both the
 // ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
+var FORKLIFT_SLOT = ${JSON.stringify(FORKLIFT_HTML)};
 window.__warpToggleShipment = function(idx) {
   var item = document.getElementById("__warp_bk_item_" + idx);
   if (!item) return;
@@ -353,7 +340,7 @@ window.__warpRenderBookings = function(data) {
 
   var SEP = ' &#183; ';
   var h = '<div class="wcard">';
-  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Shipments</span></div>';
+  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Shipments</span>' + FORKLIFT_SLOT + '</div>';
   var sub = data.shown + (data.total && data.total > data.shown ? ' of ' + data.total : '') + (data.shown===1?' shipment':' shipments') + SEP + 'newest first';
   h += '<div class="wh-sec"><div class="st">Your shipments</div><div class="ss">' + sub + '</div></div>';
 
@@ -416,6 +403,7 @@ window.__warpRenderBookings = function(data) {
   h += '<div class="wm-foot">Click a shipment for details &#183; ask me to track, pull docs, or book another</div>';
   h += '</div>'; // card
   root.innerHTML = h;
+  try { if (window.__warpForklift) window.__warpForklift(); } catch (e) {}
 
   // Delegated click handling (no inline onclick — robust against sandbox CSP that
   // blocks event-handler attributes). One listener on root handles Track + rows.
@@ -474,6 +462,7 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
+<script>${FORKLIFT_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>
