@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.14.1",
+  "version": "0.16.0",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "26 tools covering the full freight booking lifecycle:\n\n- **Mode compare** — the one call for \"what's the cheapest way to ship this?\": prices every mode the load can legally ride (cargo van, box truck, LTL, FTL) in parallel and returns the winning mode, a bookable quote id, and the cost-vs-transit trade-off already calculated\n- **Quote** — instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL; LTL splits the fast Warp rate from the 30+ carrier market comparison so you see a price in ~1-2s\n- **Batch** — price an entire spreadsheet of lanes in one call, then confirm N quoted lanes in one batch book, each rendered as a single card\n- **Multi-stop** — quote and book one truck across 3+ stops\n- **Book** — book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** — real-time shipment status and full event timeline\n- **Manage** — list bookings and quotes, lane history, invoices, BOLs and PODs, saved locations and load templates\n- **Auth** — in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
   "author": {
@@ -45,107 +45,111 @@
   },
   "tools": [
     {
-      "name": "warp_van_quote",
+      "name": "van_quote",
       "description": "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)"
     },
     {
-      "name": "warp_box_truck_quote",
+      "name": "box_truck_quote",
       "description": "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)"
     },
     {
-      "name": "warp_ftl_quote",
+      "name": "ftl_quote",
       "description": "Quote a full truckload (53' dry van)"
     },
     {
-      "name": "warp_ltl_quote",
-      "description": "Quote an LTL shipment — Warp's flagship freight product"
+      "name": "ltl_quote",
+      "description": "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately"
     },
     {
-      "name": "warp_ltl_market_options",
-      "description": "Compare LTL rates across 30+ carriers for a lane"
+      "name": "ltl_market_options",
+      "description": "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s)"
     },
     {
-      "name": "warp_batch_quote",
-      "description": "Price an entire spreadsheet of lanes in one call, rendered as a single card"
+      "name": "compare_modes",
+      "description": "THE ONE CALL for \"what's the cheapest/best way to ship this?\""
     },
     {
-      "name": "warp_multistop_quote",
-      "description": "Quote one truck across 3+ stops (multi-stop FTL)"
+      "name": "batch_quote",
+      "description": "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets)"
     },
     {
-      "name": "warp_book",
-      "description": "Book a quoted shipment; charges saved card and auto-refunds on failure"
+      "name": "book",
+      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier)"
     },
     {
-      "name": "warp_batch_book",
-      "description": "Confirm multiple quoted lanes in one call with a single progress card"
+      "name": "batch_book",
+      "description": "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row)"
     },
     {
-      "name": "warp_multistop_book",
-      "description": "Book a multi-stop FTL shipment across 3+ stops"
+      "name": "multistop_quote",
+      "description": "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery)"
     },
     {
-      "name": "warp_track",
+      "name": "multistop_book",
+      "description": "Book a multi-stop FTL route quoted by multistop_quote"
+    },
+    {
+      "name": "track",
       "description": "Track a shipment by ID or tracking number"
     },
     {
-      "name": "warp_events",
-      "description": "Full tracking event timeline for a shipment"
+      "name": "lane_history",
+      "description": "Get shipping history for your lanes (past shipments, last consignee, counts)"
     },
     {
-      "name": "warp_list_bookings",
-      "description": "List recent bookings, newest first"
+      "name": "list_bookings",
+      "description": "List recent bookings for this API key, newest first"
     },
     {
-      "name": "warp_quote_history",
-      "description": "List recent quotes across all sessions"
+      "name": "status",
+      "description": "Check Warp API health and version"
     },
     {
-      "name": "warp_lane_history",
-      "description": "Past shipments on your lanes"
+      "name": "events",
+      "description": "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries)"
     },
     {
-      "name": "warp_get_invoice",
-      "description": "Invoice for a delivered shipment"
+      "name": "get_invoice",
+      "description": "Retrieve the invoice for a delivered shipment (line items, taxes, payment status)"
     },
     {
-      "name": "warp_get_documents",
-      "description": "Shipment documents (BOL, POD, customs)"
+      "name": "get_documents",
+      "description": "List shipment documents (BOL, POD, customs forms, etc.)"
     },
     {
-      "name": "warp_locations",
-      "description": "List saved pickup and delivery locations"
+      "name": "quote_history",
+      "description": "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions"
     },
     {
-      "name": "warp_load_templates",
-      "description": "List saved load templates"
+      "name": "login",
+      "description": "Log in to Warp with email and password"
     },
     {
-      "name": "warp_save_load_template",
-      "description": "Save a reusable load template"
+      "name": "payment_status",
+      "description": "Check if the current Warp account has a payment method on file"
     },
     {
-      "name": "warp_delete_load_template",
-      "description": "Delete a saved load template"
+      "name": "analytics",
+      "description": "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli)"
     },
     {
-      "name": "warp_login",
-      "description": "Log in to Warp from inside the chat"
+      "name": "locations",
+      "description": "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses"
     },
     {
-      "name": "warp_payment_status",
-      "description": "Check whether a payment card is on file"
+      "name": "load_templates",
+      "description": "List the agent's saved load templates — reusable shipment configs (name, dims, weight, commodity)"
     },
     {
-      "name": "warp_status",
-      "description": "API health check and key validity"
+      "name": "save_load_template",
+      "description": "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes"
     },
     {
-      "name": "warp_analytics",
-      "description": "Bookings and revenue rollup by source"
+      "name": "delete_load_template",
+      "description": "Delete a saved load template by its id (starts with lt_)"
     }
   ],
-  "tools_generated": false,
+  "tools_generated": true,
   "compatibility": {
     "platforms": [
       "darwin",
