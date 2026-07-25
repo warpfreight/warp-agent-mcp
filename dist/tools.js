@@ -128,6 +128,65 @@ function errText(err) {
         return err.message;
     return String(err);
 }
+/**
+ * Turn an upstream failure into a message that names the FIX, not just the
+ * failure — the bar MISSING_DIMS set (it tells the agent exactly which fields
+ * to send next, which is why it reads as good agent UX instead of a dead end).
+ *
+ * Every tool's catch block used to return errText() alone: a raw JSON dump of
+ * the upstream body with no next step, so an agent's only move was to surface
+ * the blob to the user or silently give up. This keeps that detail (nothing is
+ * hidden) and appends exactly one concrete action, chosen from the upstream
+ * status/code. Where the API already names what's wrong (MISSING_* carries
+ * missing_fields) we point at it rather than restating it.
+ */
+function agentError(err) {
+    const detail = errText(err);
+    const status = err instanceof WarpApiError ? err.status : undefined;
+    let body = err instanceof WarpApiError ? err.body : undefined;
+    if (typeof body === "string") {
+        try {
+            body = JSON.parse(body);
+        }
+        catch { /* leave as text */ }
+    }
+    const code = typeof body?.code === "string"
+        ? body.code
+        : undefined;
+    // Our fetches abort via AbortSignal.timeout(); node surfaces that as
+    // TimeoutError/AbortError, which must read as "retry", never as "no coverage".
+    const isTimeout = err instanceof Error
+        && (err.name === "TimeoutError" || err.name === "AbortError" || /timeout|abort/i.test(err.message));
+    let next;
+    if (isTimeout) {
+        next = "The upstream pricing service did not answer in time. Nothing was quoted, booked, or charged — retry the same call in a few seconds.";
+    }
+    else if (code && code.startsWith("MISSING_")) {
+        next = "Send the fields named above (see missing_fields), then call this tool again.";
+    }
+    else if (code === "UPSTREAM_ERROR") {
+        next = "Warp has no published rate for this lane in this mode. Call `mode_compare` to price every mode that can legally carry this load, or email support@wearewarp.com for a custom quote.";
+    }
+    else if (status === 401 || status === 403) {
+        next = "The API key was rejected. Run `warp-agent login`, or set WARP_API_KEY to a wak_live_* / wak_test_* key. Note the quote tools work with no key at all — only booking and account tools need one.";
+    }
+    else if (status === 404) {
+        next = "Not found. Quote and shipment ids rotate and expire — re-run the quote (or the lookup) and use the fresh id immediately.";
+    }
+    else if (status === 429) {
+        next = "Rate limited. Wait a few seconds, then retry the same call unchanged.";
+    }
+    else if (typeof status === "number" && status >= 500) {
+        next = "Warp's upstream service is temporarily unavailable. Nothing was booked or charged — retry in a few seconds.";
+    }
+    else if (status === 400) {
+        next = "The request was rejected as invalid. Correct the field named above and call the tool again.";
+    }
+    else {
+        next = "Retry the call once; if it keeps failing, email support@wearewarp.com and include this message.";
+    }
+    return `${detail}\n\nNext: ${next}`;
+}
 // Session-level cache: PRICING_xxx -> amount so book can log revenue
 const quoteAmountCache = new Map();
 function validateDate(date) {
@@ -216,7 +275,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 2. box_truck_quote ─────────────────────────────────────
@@ -267,7 +326,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 3. ftl_quote ───────────────────────────────────────────
@@ -317,7 +376,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 4. ltl_quote ───────────────────────────────────────────
@@ -384,7 +443,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 4b. ltl_market_options ─────────────────────────────────
@@ -479,7 +538,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // Advertise the Claude / MCP Apps UI resource on each quote tool definition so
@@ -813,7 +872,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 4c. batch_quote ─────────────────────────────────────────────
@@ -880,7 +939,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     batchQuoteTool?.update({ _meta: BATCH_QUOTE_UI_META });
@@ -1023,7 +1082,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 5b. batch_book ─────────────────────────────────────────
@@ -1166,7 +1225,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     batchBookTool?.update({ _meta: BATCH_BOOK_UI_META });
@@ -1375,7 +1434,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 6. track ───────────────────────────────────────────────
@@ -1406,6 +1465,19 @@ export function registerTools(server, client, getApiKey) {
                         : typeof r.trackingNumber === "string" ? r.trackingNumber : undefined),
                 }))
                 : data;
+            // An id-scoped lookup that comes back EMPTY is not "no updates yet" — it
+            // means nothing matched that id. Returning a bare [] made the agent tell
+            // the customer their freight simply had no activity, which is the wrong
+            // answer to "where's my freight" and hides a typo'd or wrong-type id.
+            if (records && records.length === 0) {
+                return {
+                    content: [{
+                            type: "text",
+                            text: `No shipment found for id "${params.shipment_id}" — so there is no tracking to report (this is NOT "no updates yet").\n\nNext: check the id and retry. Tracking keys on the S- shipment number or the P- order number; call \`list_bookings\` to get the exact ids on this account.`,
+                        }],
+                    isError: true,
+                };
+            }
             return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
         }
         catch (err) {
@@ -1418,7 +1490,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 8. lane_history ────────────────────────────────────────
@@ -1446,7 +1518,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 9. list_bookings ───────────────────────────────────────
@@ -1476,7 +1548,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // Advertise the Claude / MCP Apps shipments card on the tool definition.
@@ -1520,7 +1592,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 12. events ─────────────────────────────────────────────
@@ -1551,7 +1623,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 13. get_invoice ────────────────────────────────────────
@@ -1582,7 +1654,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 14. get_documents ──────────────────────────────────────
@@ -1614,7 +1686,7 @@ export function registerTools(server, client, getApiKey) {
                 error_message: errText(err),
                 duration_ms: Date.now() - start,
             });
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── 15. quote_history ──────────────────────────────────────────────────────
@@ -1745,7 +1817,7 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
         catch (err) {
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── load_templates ────────────────────────────────────
@@ -1755,7 +1827,7 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
         catch (err) {
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── save_load_template ────────────────────────────────
@@ -1775,7 +1847,7 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
         catch (err) {
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
     // ── delete_load_template ──────────────────────────────
@@ -1787,7 +1859,7 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: `Deleted load template ${params.load_template_id}.` }] };
         }
         catch (err) {
-            return { content: [{ type: "text", text: errText(err) }], isError: true };
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
 }

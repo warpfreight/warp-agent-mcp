@@ -172,6 +172,56 @@ function errText(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Turn an upstream failure into a message that names the FIX, not just the
+ * failure — the bar MISSING_DIMS set (it tells the agent exactly which fields
+ * to send next, which is why it reads as good agent UX instead of a dead end).
+ *
+ * Every tool's catch block used to return errText() alone: a raw JSON dump of
+ * the upstream body with no next step, so an agent's only move was to surface
+ * the blob to the user or silently give up. This keeps that detail (nothing is
+ * hidden) and appends exactly one concrete action, chosen from the upstream
+ * status/code. Where the API already names what's wrong (MISSING_* carries
+ * missing_fields) we point at it rather than restating it.
+ */
+function agentError(err: unknown): string {
+  const detail = errText(err);
+  const status = err instanceof WarpApiError ? err.status : undefined;
+  let body: unknown = err instanceof WarpApiError ? err.body : undefined;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch { /* leave as text */ }
+  }
+  const code = typeof (body as Record<string, unknown>)?.code === "string"
+    ? ((body as Record<string, unknown>).code as string)
+    : undefined;
+  // Our fetches abort via AbortSignal.timeout(); node surfaces that as
+  // TimeoutError/AbortError, which must read as "retry", never as "no coverage".
+  const isTimeout = err instanceof Error
+    && (err.name === "TimeoutError" || err.name === "AbortError" || /timeout|abort/i.test(err.message));
+
+  let next: string;
+  if (isTimeout) {
+    next = "The upstream pricing service did not answer in time. Nothing was quoted, booked, or charged — retry the same call in a few seconds.";
+  } else if (code && code.startsWith("MISSING_")) {
+    next = "Send the fields named above (see missing_fields), then call this tool again.";
+  } else if (code === "UPSTREAM_ERROR") {
+    next = "Warp has no published rate for this lane in this mode. Call `mode_compare` to price every mode that can legally carry this load, or email support@wearewarp.com for a custom quote.";
+  } else if (status === 401 || status === 403) {
+    next = "The API key was rejected. Run `warp-agent login`, or set WARP_API_KEY to a wak_live_* / wak_test_* key. Note the quote tools work with no key at all — only booking and account tools need one.";
+  } else if (status === 404) {
+    next = "Not found. Quote and shipment ids rotate and expire — re-run the quote (or the lookup) and use the fresh id immediately.";
+  } else if (status === 429) {
+    next = "Rate limited. Wait a few seconds, then retry the same call unchanged.";
+  } else if (typeof status === "number" && status >= 500) {
+    next = "Warp's upstream service is temporarily unavailable. Nothing was booked or charged — retry in a few seconds.";
+  } else if (status === 400) {
+    next = "The request was rejected as invalid. Correct the field named above and call the tool again.";
+  } else {
+    next = "Retry the call once; if it keeps failing, email support@wearewarp.com and include this message.";
+  }
+  return `${detail}\n\nNext: ${next}`;
+}
+
 // Session-level cache: PRICING_xxx -> amount so book can log revenue
 const quoteAmountCache = new Map<string, number>();
 
@@ -291,7 +341,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -344,7 +394,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -396,7 +446,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -469,7 +519,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -570,7 +620,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -920,7 +970,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -993,7 +1043,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1148,7 +1198,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1306,7 +1356,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1537,7 +1587,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1577,6 +1627,19 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
                 : typeof r.trackingNumber === "string" ? r.trackingNumber : undefined),
             }))
           : data;
+        // An id-scoped lookup that comes back EMPTY is not "no updates yet" — it
+        // means nothing matched that id. Returning a bare [] made the agent tell
+        // the customer their freight simply had no activity, which is the wrong
+        // answer to "where's my freight" and hides a typo'd or wrong-type id.
+        if (records && records.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `No shipment found for id "${params.shipment_id}" — so there is no tracking to report (this is NOT "no updates yet").\n\nNext: check the id and retry. Tracking keys on the S- shipment number or the P- order number; call \`list_bookings\` to get the exact ids on this account.`,
+            }],
+            isError: true,
+          };
+        }
         return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       } catch (err) {
         trackEvent({
@@ -1588,7 +1651,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1623,7 +1686,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1660,7 +1723,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1712,7 +1775,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1750,7 +1813,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1788,7 +1851,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1827,7 +1890,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           error_message: errText(err),
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -1993,7 +2056,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const data = await client.getLocations();
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -2009,7 +2072,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const data = await client.getLoadTemplates();
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -2035,7 +2098,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const data = await client.saveLoadTemplate(params);
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch (err) {
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
@@ -2053,7 +2116,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         await client.deleteLoadTemplate(params.load_template_id);
         return { content: [{ type: "text", text: `Deleted load template ${params.load_template_id}.` }] };
       } catch (err) {
-        return { content: [{ type: "text", text: errText(err) }], isError: true };
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
       }
     },
   );
