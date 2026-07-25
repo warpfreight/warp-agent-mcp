@@ -1,4 +1,4 @@
-import { WARP_TOKENS_CSS, FORKLIFT_CSS, FORKLIFT_HTML, FORKLIFT_JS, } from "./warp-theme.js";
+import { WARP_TOKENS_CSS, LOGO_PARTICLE_CSS, LOGO_PARTICLE_HTML, LOGO_PARTICLE_JS, } from "./warp-theme.js";
 // Inline bookings/shipments widget for Warp MCP — a mini-TMS card.
 //
 // warp_list_bookings returns a list of shipments; this renders them as a single
@@ -129,7 +129,7 @@ export function toBookingsWidgetData(response) {
 // shipment-row + expandable-detail styling. Transparent page, theme-adaptive.
 const CARD_CSS = `
 ${WARP_TOKENS_CSS}
-${FORKLIFT_CSS}
+${LOGO_PARTICLE_CSS}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; background: transparent; color: var(--text);
@@ -206,7 +206,7 @@ const CARD_BODY = `<div class="warp-root" id="__warp_bk_root"></div>`;
 // Shared painter — builds the bookings card DOM. One definition; both the
 // ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
-var FORKLIFT_SLOT = ${JSON.stringify(FORKLIFT_HTML)};
+var LOGO_FX = ${JSON.stringify(LOGO_PARTICLE_HTML)};
 window.__warpToggleShipment = function(idx) {
   var item = document.getElementById("__warp_bk_item_" + idx);
   if (!item) return;
@@ -271,7 +271,7 @@ window.__warpRenderBookings = function(data) {
 
   var SEP = ' &#183; ';
   var h = '<div class="wcard">';
-  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Shipments</span>' + FORKLIFT_SLOT + '</div>';
+  h += '<div class="wh-head">' + LOGO_FX + '<span class="wh-ti">Shipments</span></div>';
   var sub = data.shown + (data.total && data.total > data.shown ? ' of ' + data.total : '') + (data.shown===1?' shipment':' shipments') + SEP + 'newest first';
   h += '<div class="wh-sec"><div class="st">Your shipments</div><div class="ss">' + sub + '</div></div>';
 
@@ -334,7 +334,7 @@ window.__warpRenderBookings = function(data) {
   h += '<div class="wm-foot">Click a shipment for details &#183; ask me to track, pull docs, or book another</div>';
   h += '</div>'; // card
   root.innerHTML = h;
-  try { if (window.__warpForklift) window.__warpForklift(); } catch (e) {}
+  try { if (window.__warpLogoParticles) window.__warpLogoParticles(); } catch (e) {}
 
   // Delegated click handling (no inline onclick — robust against sandbox CSP that
   // blocks event-handler attributes). One listener on root handles Track + rows.
@@ -391,7 +391,7 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
-<script>${FORKLIFT_JS}</script>
+<script>${LOGO_PARTICLE_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>

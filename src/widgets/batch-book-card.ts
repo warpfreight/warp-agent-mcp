@@ -1,8 +1,8 @@
 import {
   WARP_TOKENS_CSS,
-  FORKLIFT_CSS,
-  FORKLIFT_HTML,
-  FORKLIFT_JS,
+  LOGO_PARTICLE_CSS,
+  LOGO_PARTICLE_HTML,
+  LOGO_PARTICLE_JS,
 } from "./warp-theme.js";
 // Inline batch-book widget for Warp MCP.
 //
@@ -109,7 +109,7 @@ export function toBatchBookWidgetData(
 // Theme-adaptive card chrome (same palette as batch-quote-card / bookings-card).
 const CARD_CSS = `
 ${WARP_TOKENS_CSS}
-${FORKLIFT_CSS}
+${LOGO_PARTICLE_CSS}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; background: transparent; color: var(--text);
@@ -175,7 +175,7 @@ html, body {
 const CARD_BODY = `<div class="warp-root" id="__warp_bb_root"></div>`;
 
 const RENDER_FN_JS = `
-var FORKLIFT_SLOT = ${JSON.stringify(FORKLIFT_HTML)};
+var LOGO_FX = ${JSON.stringify(LOGO_PARTICLE_HTML)};
 window.__warpToggleBookRow = function(idx) {
   var item = document.getElementById("__warp_bb_item_" + idx);
   if (!item) return;
@@ -191,7 +191,7 @@ window.__warpRenderBatchBook = function(data) {
 
   var SEP = ' &#183; ';
   var h = '<div class="wcard">';
-  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span>' + FORKLIFT_SLOT + '</div>';
+  h += '<div class="wh-head">' + LOGO_FX + '<span class="wh-ti">Freight</span></div>';
 
   var sub = data.total + (data.total===1?' shipment':' shipments')
     + (data.succeeded>0 ? SEP + data.succeeded + ' booked' : '')
@@ -256,7 +256,7 @@ window.__warpRenderBatchBook = function(data) {
   h += '<div class="wm-foot">Click a row for tracking &amp; details</div>';
   h += '</div>'; // card
   root.innerHTML = h;
-  try { if (window.__warpForklift) window.__warpForklift(); } catch (e) {}
+  try { if (window.__warpLogoParticles) window.__warpLogoParticles(); } catch (e) {}
 
   // Delegated click — CSP-safe, no inline onclick. Ignore clicks on links so
   // the Track link doesn't also toggle the row.
@@ -305,7 +305,7 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
-<script>${FORKLIFT_JS}</script>
+<script>${LOGO_PARTICLE_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>

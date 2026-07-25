@@ -59,9 +59,9 @@ export interface QuoteWidgetData {
 
 import {
   WARP_TOKENS_CSS,
-  FORKLIFT_CSS,
-  FORKLIFT_HTML,
-  FORKLIFT_JS,
+  LOGO_PARTICLE_CSS,
+  LOGO_PARTICLE_HTML,
+  LOGO_PARTICLE_JS,
 } from "./warp-theme.js";
 
 export const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
@@ -141,7 +141,7 @@ export function toWidgetData(
 // Claude's surface either way (and never renders as a dark slab on light).
 const CARD_CSS = `
 ${WARP_TOKENS_CSS}
-${FORKLIFT_CSS}
+${LOGO_PARTICLE_CSS}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
@@ -247,7 +247,7 @@ const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 // Shared painter. Receives QuoteWidgetData and builds the card DOM. One
 // definition; both the ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
-var FORKLIFT_SLOT = ${JSON.stringify(FORKLIFT_HTML)};
+var LOGO_FX = ${JSON.stringify(LOGO_PARTICLE_HTML)};
 window.__warpRenderCard = function(data) {
   var root = document.getElementById("__warp_root");
   if (!root || !data || !data.warp) return;
@@ -271,7 +271,7 @@ window.__warpRenderCard = function(data) {
   var h = '<div class="wcard">';
 
   // header — real Warp wordmark + "Freight"
-  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span>' + FORKLIFT_SLOT + '</div>';
+  h += '<div class="wh-head">' + LOGO_FX + '<span class="wh-ti">Freight</span></div>';
 
   // section header — "Available options" + the lane
   h += '<div class="wh-sec"><div class="st">Available options</div><div class="ss">' +
@@ -331,7 +331,7 @@ window.__warpRenderCard = function(data) {
 
   h += '</div>';
   root.innerHTML = h;
-  try { if (window.__warpForklift) window.__warpForklift(); } catch (e) {}
+  try { if (window.__warpLogoParticles) window.__warpLogoParticles(); } catch (e) {}
 };`;
 
 const OPENAI_CLIENT_JS = `
@@ -366,7 +366,7 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
-<script>${FORKLIFT_JS}</script>
+<script>${LOGO_PARTICLE_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>
