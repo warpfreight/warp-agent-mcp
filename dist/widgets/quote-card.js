@@ -14,7 +14,6 @@
 //     the bundled App client. Resource: ui://warp/quote-card.mcp (text/html;profile=mcp-app)
 // Non-UI clients ignore both and fall back to the text JSON.
 import { APP_CLIENT_BUNDLE } from "./quote-card-client-bundle.js";
-import { WARP_TOKENS_CSS, LOGO_PARTICLE_CSS, LOGO_PARTICLE_HTML, LOGO_PARTICLE_JS, } from "./warp-theme.js";
 export const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
 export const QUOTE_CARD_MCP_RESOURCE_URI = "ui://warp/quote-card.mcp";
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
@@ -82,8 +81,38 @@ export function toWidgetData(mode, input, response) {
 // and flips to dark only under prefers-color-scheme:dark — so it blends into
 // Claude's surface either way (and never renders as a dark slab on light).
 const CARD_CSS = `
-${WARP_TOKENS_CSS}
-${LOGO_PARTICLE_CSS}
+:root {
+  --card: #ffffff;
+  --line: #eceae3;
+  --line2: #f3f1ec;
+  --text: #1c1b19;
+  --muted: #6f7480;
+  --dim: #9a9ea6;
+  --accent: #16a34a;
+  --accent-soft: rgba(74,222,128,0.16);
+  --warp-tint: rgba(74,222,128,0.07);
+  --icon-bg: #f1f0ec;
+  --icon-text: #5b6068;
+  --logo: #16a34a;
+  --shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --card: #1b1b1d;
+    --line: #2f2f32;
+    --line2: #262629;
+    --text: #ececed;
+    --muted: #9a9aa2;
+    --dim: #71717a;
+    --accent: #4ade80;
+    --accent-soft: rgba(74,222,128,0.15);
+    --warp-tint: rgba(74,222,128,0.055);
+    --icon-bg: #27272a;
+    --icon-text: #b6b6bd;
+    --logo: #00FF33;
+    --shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+}
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
@@ -187,7 +216,6 @@ const CARD_BODY = `<div class="warp-root" id="__warp_root"></div>`;
 // Shared painter. Receives QuoteWidgetData and builds the card DOM. One
 // definition; both the ChatGPT reader and the Claude App client call it.
 const RENDER_FN_JS = `
-var LOGO_FX = ${JSON.stringify(LOGO_PARTICLE_HTML)};
 window.__warpRenderCard = function(data) {
   var root = document.getElementById("__warp_root");
   if (!root || !data || !data.warp) return;
@@ -211,7 +239,7 @@ window.__warpRenderCard = function(data) {
   var h = '<div class="wcard">';
 
   // header — real Warp wordmark + "Freight"
-  h += '<div class="wh-head">' + LOGO_FX + '<span class="wh-ti">Freight</span></div>';
+  h += '<div class="wh-head"><span class="wh-logo">' + LOGO + '</span><span class="wh-ti">Freight</span></div>';
 
   // section header — "Available options" + the lane
   h += '<div class="wh-sec"><div class="st">Available options</div><div class="ss">' +
@@ -271,7 +299,6 @@ window.__warpRenderCard = function(data) {
 
   h += '</div>';
   root.innerHTML = h;
-  try { if (window.__warpLogoParticles) window.__warpLogoParticles(); } catch (e) {}
 };`;
 const OPENAI_CLIENT_JS = `
 (function() {
@@ -304,7 +331,6 @@ ${CARD_BODY}
 
 ${opts.dataScript ?? ""}
 
-<script>${LOGO_PARTICLE_JS}</script>
 <script>${RENDER_FN_JS}</script>
 <script>${opts.clientScript}</script>
 </body>
