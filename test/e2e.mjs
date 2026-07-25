@@ -50,7 +50,7 @@ const EXPECTED_TOOLS = [
   "login",
   "ltl_market_options",
   "ltl_quote",
-  "mode_compare",
+  "compare_modes",
   "multistop_book",
   "multistop_quote",
   "payment_status",

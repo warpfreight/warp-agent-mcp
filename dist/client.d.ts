@@ -35,6 +35,29 @@ export declare class WarpClient {
     private _selfServeQuote;
     ltlMarketOptions(params: Record<string, unknown>): Promise<unknown[]>;
     private _ltlMarketOptions;
+    /**
+     * All four modes in ONE upstream call via the public keyless all-modes
+     * endpoint (POST /api/v1/quote). The server fans out to the four mode
+     * handlers in-process and returns, per mode: price, transit, quote_tier,
+     * assumptions, missing_for_ship, booking_url — and for a mode it can't price,
+     * `available: false` plus a `reason`.
+     *
+     * Preferred over four separate mode calls: one round trip, and the firmness
+     * tier / missing_for_ship come from the pricing engine itself instead of being
+     * re-derived client-side.
+     *
+     * Dims are injected when the caller omits them (see buildQuoteBody). That is
+     * deliberate here: WITHOUT dims this endpoint drops LTL entirely with
+     * "LTL quotes require dimensions", and LTL is usually the cheapest mode — so
+     * passing through would quietly quote FTL-only and overstate the price by
+     * multiples. We inject to keep LTL in the comparison and report `dims_assumed`
+     * so the caller can downgrade the tier and disclose it.
+     */
+    allModesQuote(params: Record<string, unknown>): Promise<{
+        raw: Record<string, unknown>;
+        dimsAssumed: boolean;
+        assumedDimFields: string[];
+    }>;
     vanQuote(params: Record<string, unknown>): Promise<unknown>;
     boxTruckQuote(params: Record<string, unknown>): Promise<unknown>;
     ftlQuote(params: Record<string, unknown>): Promise<unknown>;

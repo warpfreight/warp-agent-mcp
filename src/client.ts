@@ -281,6 +281,54 @@ export class WarpClient {
     return Array.isArray(j.market_options) ? j.market_options : [];
   }
 
+  /**
+   * All four modes in ONE upstream call via the public keyless all-modes
+   * endpoint (POST /api/v1/quote). The server fans out to the four mode
+   * handlers in-process and returns, per mode: price, transit, quote_tier,
+   * assumptions, missing_for_ship, booking_url — and for a mode it can't price,
+   * `available: false` plus a `reason`.
+   *
+   * Preferred over four separate mode calls: one round trip, and the firmness
+   * tier / missing_for_ship come from the pricing engine itself instead of being
+   * re-derived client-side.
+   *
+   * Dims are injected when the caller omits them (see buildQuoteBody). That is
+   * deliberate here: WITHOUT dims this endpoint drops LTL entirely with
+   * "LTL quotes require dimensions", and LTL is usually the cheapest mode — so
+   * passing through would quietly quote FTL-only and overstate the price by
+   * multiples. We inject to keep LTL in the comparison and report `dims_assumed`
+   * so the caller can downgrade the tier and disclose it.
+   */
+  async allModesQuote(params: Record<string, unknown>): Promise<{
+    raw: Record<string, unknown>;
+    dimsAssumed: boolean;
+    assumedDimFields: string[];
+  }> {
+    const assumedDimFields = (["length_in", "width_in", "height_in"] as const)
+      .filter((k) => !(Number(params[k]) > 0));
+    const key = this.getApiKey();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+    const res = await fetch(`${this.selfServeOrigin}/api/v1/quote`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(this.buildQuoteBody(params)),
+      cache: "no-store",
+      // The route fans out to four mode handlers; the slowest dominates. 25s
+      // matches the single-mode budget with headroom for the fan-out.
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => res.statusText);
+      throw new WarpApiError(res.status, txt);
+    }
+    return {
+      raw: await res.json() as Record<string, unknown>,
+      dimsAssumed: assumedDimFields.length > 0,
+      assumedDimFields,
+    };
+  }
+
   async vanQuote(params: Record<string, unknown>) {
     return this._selfServeQuote("van", params);
   }

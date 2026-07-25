@@ -38,7 +38,7 @@ transaction**, not just the lookup:
 
 | Tool | What it does |
 |---|---|
-| `mode_compare` | **Start here.** Compare every eligible mode (van/box truck/LTL/FTL) in one parallel call and get a decision-complete recommendation with the trade-off math |
+| `compare_modes` | **Start here.** Compare every eligible mode (van/box truck/LTL/FTL) in one parallel call and get a decision-complete recommendation with the trade-off math |
 | `van_quote` | Quote a 1–3 pallet cargo van shipment |
 | `box_truck_quote` | Quote a 1–12 pallet box truck shipment |
 | `ftl_quote` | Quote a full truckload (53' dry van) |

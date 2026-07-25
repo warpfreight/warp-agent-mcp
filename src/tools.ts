@@ -205,7 +205,7 @@ function agentError(err: unknown): string {
   } else if (code && code.startsWith("MISSING_")) {
     next = "Send the fields named above (see missing_fields), then call this tool again.";
   } else if (code === "UPSTREAM_ERROR") {
-    next = "Warp has no published rate for this lane in this mode. Call `mode_compare` to price every mode that can legally carry this load, or email support@wearewarp.com for a custom quote.";
+    next = "Warp has no published rate for this lane in this mode. Call `compare_modes` to price every mode that can legally carry this load, or email support@wearewarp.com for a custom quote.";
   } else if (status === 401 || status === 403) {
     next = "The API key was rejected. Run `warp-agent login`, or set WARP_API_KEY to a wak_live_* / wak_test_* key. Note the quote tools work with no key at all — only booking and account tools need one.";
   } else if (status === 404) {
@@ -633,7 +633,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     t?.update({ _meta: UI_META });
   }
 
-  // ── 4d. mode_compare ────────────────────────────────────────────
+  // ── 4d. compare_modes ────────────────────────────────────────────
   // The broker brain. One call that does the judgment a shipper pays a broker
   // for: decide which modes the load can legally ride, price every eligible one
   // IN PARALLEL, and return a single decision-complete recommendation with the
@@ -699,8 +699,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   };
 
   tool(
-    "mode_compare",
-    "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Compares EVERY freight mode the load can legally ride (cargo van / 26' box truck / LTL / FTL) in ONE parallel call and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — mode eligibility and the cost-per-day-saved math are computed server-side, so the cheapest valid option can't be missed. Dims are optional (a standard 48x40x48 pallet is assumed). Set benchmark_market:true to also rank Warp's rate against the live 30+ carrier market for the lane (adds ~15-25s) — that makes the answer decision-complete: the right mode AND whether the price is actually good. Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.",
+    "compare_modes",
+    "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Prices ALL FOUR freight modes (LTL / full truckload / cargo van / 26' box truck) in ONE keyless call to Warp's all-modes engine and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — one round trip, and modes Warp can't serve are returned as explicitly unavailable WITH the reason rather than being dropped, so there is never a silently shortened list to guess from. Dims are optional (a standard 48x40x48 pallet is assumed). Set benchmark_market:true to also rank Warp's rate against the live 30+ carrier market for the lane (adds ~15-25s) — that makes the answer decision-complete: the right mode AND whether the price is actually good. Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.",
     {
       origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
       destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
@@ -738,86 +738,81 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         const weightPer = params.weight_lbs_per_pallet;
         const totalWeight = pallets * weightPer;
 
-        // 1. Eligibility — the first half of the broker judgment. A mode that
-        //    structurally can't carry the load is never quoted, and the reason
-        //    is reported so the agent can explain it.
-        const eligible: QuoteMode[] = [];
-        const unavailable: Array<{ mode: string; mode_label: string; reason: string }> = [];
-        for (const mode of ["van", "box-truck", "ltl", "ftl"] as QuoteMode[]) {
-          const lim = MODE_LIMITS[mode];
-          const reasons: string[] = [];
-          if (pallets > lim.maxPallets) reasons.push(`holds ${lim.maxPallets} pallet${lim.maxPallets === 1 ? "" : "s"}, this load is ${pallets}`);
-          if (weightPer > lim.maxWeightPerPallet) reasons.push(`tops out at ${lim.maxWeightPerPallet.toLocaleString("en-US")} lb per pallet, this load is ${weightPer.toLocaleString("en-US")} lb`);
-          if (reasons.length) unavailable.push({ mode, mode_label: MODE_LABELS[mode], reason: `${MODE_LABELS[mode]} ${reasons.join("; ")}.` });
-          else eligible.push(mode);
-        }
-
-        // 2. Price every eligible mode CONCURRENTLY. allSettled (not all) so one
-        //    dead mode never suppresses the rest — a lane with no van coverage
-        //    must still return its LTL and FTL rates.
-        const quoteFor = (mode: QuoteMode) => {
-          const p = params as unknown as Record<string, unknown>;
-          if (mode === "van") return client.vanQuote(p);
-          if (mode === "box-truck") return client.boxTruckQuote(p);
-          if (mode === "ftl") return client.ftlQuote(p);
-          return client.ltlQuote(p);
-        };
-        // Optional lane benchmark. Fired CONCURRENTLY with the mode quotes so the
-        // total is max(modes, spread) — never the sum. Opt-in because the carrier
-        // poll runs ~15-25s while the mode comparison alone lands in ~1-2s; a
-        // caller that wants the fast answer must not pay for the slow one.
+        // 1. ONE upstream call for all four modes. The all-modes route
+        //    (POST /api/v1/quote) already fans out to the four mode handlers
+        //    in-process and returns each one's price, transit, quote_tier,
+        //    assumptions and missing_for_ship — so we wrap it rather than
+        //    re-deriving any of that client-side. Optional lane benchmark runs
+        //    CONCURRENTLY, so total latency is max(quote, spread), never the sum.
         const wantBenchmark = params.benchmark_market === true;
-        const [settled, marketRows] = await Promise.all([
-          Promise.allSettled(eligible.map((m) => quoteFor(m))),
+        const [allModes, marketRows] = await Promise.all([
+          client.allModesQuote(params as unknown as Record<string, unknown>),
           wantBenchmark
             ? client.ltlMarketOptions(params as unknown as Record<string, unknown>).catch(() => [] as unknown[])
             : Promise.resolve([] as unknown[]),
         ]);
 
+        // The route names modes cargo_van / box_truck; our labels and limits are
+        // keyed by the MCP's QuoteMode vocabulary.
+        const MODE_FROM_ROUTE: Record<string, QuoteMode> = {
+          ltl: "ltl", ftl: "ftl", cargo_van: "van", box_truck: "box-truck",
+        };
+
         const priced: PricedMode[] = [];
-        // Keyed BY MODE, not first-seen: the disclosure is mode-specific ("LTL
-        // prices off size" vs "VAN is per-vehicle"), so showing another mode's
-        // text next to the winner would state the opposite of the truth.
-        const disclosureByMode = new Map<QuoteMode, string>();
-        settled.forEach((outcome, i) => {
-          const mode = eligible[i];
+        const unavailable: Array<{ mode: string; mode_label: string; reason: string }> = [];
+        const results = Array.isArray(allModes.raw.results)
+          ? (allModes.raw.results as Array<Record<string, unknown>>)
+          : [];
+
+        for (const row of results) {
+          const mode = MODE_FROM_ROUTE[String(row.mode)];
+          if (!mode) continue;
           const label = MODE_LABELS[mode];
-          if (outcome.status === "rejected") {
-            // Upstream threw (non-2xx / timeout). Report it honestly as a mode
-            // that couldn't be priced — never silently drop it.
-            unavailable.push({ mode, mode_label: label, reason: `${label}: no live rate on this lane — ${upstreamReason(outcome.reason)}. The other modes below are unaffected.` });
-            return;
+          const det = (row.details ?? {}) as Record<string, unknown>;
+          const price = typeof row.price_usd === "number" ? row.price_usd : null;
+          const quoteId = typeof row.quote_id === "string" ? row.quote_id : null;
+
+          if (row.available !== true || price === null || !quoteId) {
+            // Unavailable modes are KEPT, never filtered out — an honest "not
+            // available" stops the model inventing a number for a mode we can't
+            // serve. Where the load structurally cannot ride the mode, say THAT
+            // instead of the route's generic "a rate has not yet been determined",
+            // which misreads as a coverage gap rather than a physical limit.
+            const lim = MODE_LIMITS[mode];
+            const physical: string[] = [];
+            if (pallets > lim.maxPallets) physical.push(`holds ${lim.maxPallets} pallet${lim.maxPallets === 1 ? "" : "s"}, this load is ${pallets}`);
+            if (weightPer > lim.maxWeightPerPallet) physical.push(`tops out at ${lim.maxWeightPerPallet.toLocaleString("en-US")} lb per pallet, this load is ${weightPer.toLocaleString("en-US")} lb`);
+            unavailable.push({
+              mode, mode_label: label,
+              reason: physical.length
+                ? `${label} ${physical.join("; ")} — it physically cannot carry this load, so no rate was requested.`
+                : `${label}: ${typeof row.reason === "string" && row.reason ? row.reason : "no rate available on this lane"}.`,
+            });
+            continue;
           }
-          const data = outcome.value as Record<string, unknown>;
-          const quoteId = (data.warp_quote_id as string | null) ?? null;
-          const price = (data.warp_price as number | null) ?? null;
-          if (!quoteId || typeof price !== "number") {
-            // 200 with no quote id = genuinely no Warp coverage for that mode.
-            unavailable.push({ mode, mode_label: label, reason: (data._note as string) || `No ${label} coverage on this lane.` });
-            return;
-          }
+
           quoteAmountCache.set(quoteId, price);
-          for (const o of ((data.options as Array<Record<string, unknown>>) ?? [])) {
-            if (o.id && o.rate) quoteAmountCache.set(o.id as string, o.rate as number);
-          }
           logQuote(WARP_API_KEY(), quoteId, params.origin_zip, params.destination_zip, mode.toUpperCase(), Math.round(price * 100), pallets);
+          // A tier of "firm" is only trustworthy if the DIMS were the caller's.
+          // We inject a standard pallet when they're omitted (otherwise the route
+          // drops LTL entirely), and LTL prices off size — so downgrade and put
+          // the assumed fields back on the missing list.
+          const dimsMatter = mode === "ltl";
+          const routeTier = typeof det.quote_tier === "string" ? det.quote_tier : null;
+          const routeMissing = Array.isArray(det.missing_for_ship) ? (det.missing_for_ship as string[]) : [];
           priced.push({
             mode, mode_label: label, price_usd: price,
-            transit_days: (data.warp_transit_days as number | null) ?? null,
-            delivery_date: (data.delivery_date as string | null) ?? null,
+            transit_days: typeof row.transit_days === "number" ? row.transit_days : null,
+            delivery_date: typeof det.delivery_date === "string" ? det.delivery_date : null,
             quote_id: quoteId,
-            expires_at: (data.expires_at as string | null) ?? null,
-            booking_url: (data.booking_url as string | null) ?? null,
-            quote_tier: (data.quote_tier as string | null) ?? null,
-            missing_for_ship: Array.isArray(data.missing_for_ship) ? (data.missing_for_ship as string[]) : [],
+            expires_at: typeof det.expires_at === "string" ? det.expires_at : null,
+            booking_url: typeof det.booking_url === "string" ? det.booking_url : null,
+            quote_tier: allModes.dimsAssumed && dimsMatter ? "indicative" : routeTier,
+            missing_for_ship: allModes.dimsAssumed && dimsMatter
+              ? Array.from(new Set([...routeMissing, ...allModes.assumedDimFields]))
+              : routeMissing,
           });
-          // The quote route tells us what it still needs and what we assumed on
-          // the caller's behalf, so the answer can never present an invented
-          // pallet size as a settled price.
-          if (typeof data.dims_disclosure === "string") {
-            disclosureByMode.set(mode, data.dims_disclosure);
-          }
-        });
+        }
 
         // 3. Rank. Unknown transit sorts last on the "fastest" axis rather than
         //    pretending to be instant.
@@ -834,7 +829,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
             structuredContent: {
               lane: { origin_zip: params.origin_zip, destination_zip: params.destination_zip, pickup_date: params.pickup_date },
               recommended: null, alternatives: [], unavailable,
-              priced_modes: 0, compared_modes: eligible.length, elapsed_ms: Date.now() - start,
+              priced_modes: 0, compared_modes: results.length, elapsed_ms: Date.now() - start,
             },
             isError: true,
           };
@@ -904,7 +899,13 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         // Label the headline honestly. An indicative price priced on a pallet we
         // invented must never read like a settled number the customer can rely on.
         const indicative = winner.quote_tier === "indicative";
-        const dimsDisclosure = disclosureByMode.get(winner.mode) ?? "";
+        // Disclosure is mode-specific: LTL prices off pallet size, the vehicle
+        // modes don't. Show the WINNER's truth, never another mode's.
+        const dimsDisclosure = !allModes.dimsAssumed
+          ? ""
+          : winner.mode === "ltl"
+            ? `Priced on an ASSUMED standard 48x40x48 in pallet — ${allModes.assumedDimFields.join(", ")} not provided. LTL price is driven by pallet size, especially HEIGHT: a taller pallet can cost several times more on the same lane. Treat this as indicative and send length_in/width_in/height_in for a firm price. (Without any dims the engine drops LTL entirely, so a standard pallet was assumed to keep it in the comparison.)`
+            : `Dimensions were assumed (standard 48x40x48 in pallet), but ${winner.mode_label} is priced per vehicle, so the rate does not change with pallet size.`;
         const summary = [
           `${winner.mode_label} — ${usd(winner.price_usd)}${winner.transit_days ? `, ${winner.transit_days} day${winner.transit_days === 1 ? "" : "s"}` : ""}${winner.delivery_date ? `, delivers ${winner.delivery_date}` : ""}${indicative ? "   [INDICATIVE — not a firm price]" : ""}`,
           dimsDisclosure,
@@ -934,7 +935,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           unavailable,
           market_benchmark,
           priced_modes: priced.length,
-          compared_modes: eligible.length,
+          compared_modes: results.length,
           elapsed_ms: Date.now() - start,
           next_step: `To book, call \`book\` with quote_id "${winner.quote_id}" plus pickup and delivery addresses — only after the user explicitly confirms. This tool never books.`,
         };
@@ -943,7 +944,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           product: 'warp-agent',
           source: 'mcp',
           event_type: 'quote',
-          tool_name: 'warp_mode_compare',
+          tool_name: 'warp_compare_modes',
           success: true,
           origin_zip: params.origin_zip,
           dest_zip: params.destination_zip,
@@ -965,7 +966,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           product: 'warp-agent',
           source: 'mcp',
           event_type: 'error',
-          tool_name: 'warp_mode_compare',
+          tool_name: 'warp_compare_modes',
           success: false,
           error_message: errText(err),
           duration_ms: Date.now() - start,
@@ -1930,7 +1931,13 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       email: z.string().email().describe("Warp account email"),
       password: z.string().min(1).describe("Warp account password"),
     },
-    { title: "Log In to Warp" },
+    // Anthropic's connector gate requires every tool to carry the applicable
+    // readOnlyHint or destructiveHint. login is neither read-only (it writes
+    // credentials to ~/.warp/config.json) nor destructive (it destroys nothing
+    // and is undone by logging in again), so both are declared explicitly —
+    // MCP treats an ABSENT destructiveHint as true, which would wrongly flag
+    // signing in as a dangerous operation.
+    { title: "Log In to Warp", readOnlyHint: false, destructiveHint: false },
     async (params) => {
       try {
         const CUSTOMER_URL = "https://customer.wearewarp.com";
@@ -2092,7 +2099,10 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       stackable: z.boolean().optional().describe("Whether the freight is stackable"),
       hazmat: z.boolean().optional().describe("Whether the freight is hazmat"),
     },
-    { title: "Save Load Template" },
+    // Creates a named template: a write, so not read-only, but purely additive
+    // and separately removable via delete_load_template, so not destructive.
+    // Declared explicitly for the same reason as login above.
+    { title: "Save Load Template", readOnlyHint: false, destructiveHint: false },
     async (params) => {
       try {
         const data = await client.saveLoadTemplate(params);
