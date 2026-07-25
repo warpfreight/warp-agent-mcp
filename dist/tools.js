@@ -824,6 +824,14 @@ export function registerTools(server, client, getApiKey) {
                 quote_tier: winner.quote_tier,
                 is_firm: winner.quote_tier === "firm",
                 missing_for_firm_price: winner.missing_for_ship,
+                // The upstream all-modes response, VERBATIM. The backlog's definition
+                // of done requires this tool's output to match the reference endpoint's
+                // shape, so `results[]` and `book` are passed through untouched
+                // (every mode, including the unavailable ones, with the engine's own
+                // details/assumptions/booking_url). The recommendation fields above are
+                // additive on top — nothing upstream is reshaped or dropped.
+                results: allModes.raw.results ?? [],
+                book: allModes.raw.book ?? null,
                 priority,
                 recommended: { ...winner, why },
                 alternatives: rest,
