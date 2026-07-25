@@ -37,13 +37,47 @@ export class WarpClient {
    */
   private quoteCtxCache: Map<string, CachedQuote> = new Map();
 
-  constructor(baseUrl: string, apiKeyOrGetter?: string | (() => string | undefined)) {
+  constructor(
+    baseUrl: string,
+    apiKeyOrGetter?: string | (() => string | undefined),
+    getExtraHeaders?: () => Record<string, string>,
+  ) {
     this.base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     if (typeof apiKeyOrGetter === "function") {
       this.getApiKey = apiKeyOrGetter;
     } else {
       const k = apiKeyOrGetter;
       this.getApiKey = () => k;
+    }
+    if (getExtraHeaders) this.getExtraHeaders = getExtraHeaders;
+  }
+
+  /**
+   * Optional per-request extra headers, merged into every upstream call
+   * (core headers win on conflict). Why this exists: hosted multi-tenant
+   * wrappers (warp-mcp-remote) fan MANY end users through ONE egress IP, and
+   * warp-site's keyless quote limiter buckets anonymous traffic per IP
+   * (quoteRateLimit.ts: 60/hr, keyed on the first x-forwarded-for entry). By
+   * passing `() => ({ "x-forwarded-for": <end client IP> })` here, the wrapper
+   * gives each end user their own upstream bucket instead of all anonymous
+   * users sharing — and exhausting — a single one. No security downgrade: XFF
+   * is client-suppliable on the public endpoint anyway; this just makes the
+   * honest path attribute correctly. Local/stdio installs never set it.
+   */
+  private getExtraHeaders: () => Record<string, string> = () => ({});
+
+  /** Sanitized extra headers for THIS request (getter may throw — never let
+   *  telemetry-grade headers break a live quote). */
+  private extraHeaders(): Record<string, string> {
+    try {
+      const raw = this.getExtraHeaders() ?? {};
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === "string" && v) out[k] = v;
+      }
+      return out;
+    } catch {
+      return {};
     }
   }
 
@@ -55,6 +89,7 @@ export class WarpClient {
 
   private headers(auth: boolean): Record<string, string> {
     const h: Record<string, string> = {
+      ...this.extraHeaders(),
       "content-type": "application/json",
       accept: "application/json",
       "user-agent": USER_AGENT,
@@ -169,7 +204,7 @@ export class WarpClient {
     const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
     const body = this.buildQuoteBody(params);
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
 
     const res = await fetch(url, {
@@ -267,7 +302,7 @@ export class WarpClient {
     key: string | undefined,
   ): Promise<unknown[]> {
     const url = `${this.selfServeOrigin}/api/v1/ltl/market-options`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(url, {
       method: "POST", headers, body: JSON.stringify(body),
@@ -307,7 +342,7 @@ export class WarpClient {
     const assumedDimFields = (["length_in", "width_in", "height_in"] as const)
       .filter((k) => !(Number(params[k]) > 0));
     const key = this.getApiKey();
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(`${this.selfServeOrigin}/api/v1/quote`, {
       method: "POST",
@@ -520,7 +555,7 @@ export class WarpClient {
     const key = this.getApiKey();
     let url = `${this.selfServeOrigin}${path}`;
     if (opts?.query) url += `?${new URLSearchParams(opts.query).toString()}`;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(url, {
       method,
@@ -600,7 +635,7 @@ export class WarpClient {
     if (params.pickup_window)   body.pickup_window   = params.pickup_window;
     if (params.delivery_window) body.delivery_window = params.delivery_window;
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
 
     const res = await fetch(url, {

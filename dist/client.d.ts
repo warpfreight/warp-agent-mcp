@@ -19,7 +19,23 @@ export declare class WarpClient {
      * already pinned down.
      */
     private quoteCtxCache;
-    constructor(baseUrl: string, apiKeyOrGetter?: string | (() => string | undefined));
+    constructor(baseUrl: string, apiKeyOrGetter?: string | (() => string | undefined), getExtraHeaders?: () => Record<string, string>);
+    /**
+     * Optional per-request extra headers, merged into every upstream call
+     * (core headers win on conflict). Why this exists: hosted multi-tenant
+     * wrappers (warp-mcp-remote) fan MANY end users through ONE egress IP, and
+     * warp-site's keyless quote limiter buckets anonymous traffic per IP
+     * (quoteRateLimit.ts: 60/hr, keyed on the first x-forwarded-for entry). By
+     * passing `() => ({ "x-forwarded-for": <end client IP> })` here, the wrapper
+     * gives each end user their own upstream bucket instead of all anonymous
+     * users sharing — and exhausting — a single one. No security downgrade: XFF
+     * is client-suppliable on the public endpoint anyway; this just makes the
+     * honest path attribute correctly. Local/stdio installs never set it.
+     */
+    private getExtraHeaders;
+    /** Sanitized extra headers for THIS request (getter may throw — never let
+     *  telemetry-grade headers break a live quote). */
+    private extraHeaders;
     private rememberQuote;
     private headers;
     private request;
