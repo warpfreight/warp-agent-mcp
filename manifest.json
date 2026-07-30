@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "26 tools covering the full freight booking lifecycle:\n\n- **Mode compare** \u2014 the one call for \"what's the cheapest way to ship this?\": prices every mode the load can legally ride (cargo van, box truck, LTL, FTL) in parallel and returns the winning mode, a bookable quote id, and the cost-vs-transit trade-off already calculated\n- **Quote** \u2014 instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL; LTL splits the fast Warp rate from the 30+ carrier market comparison so you see a price in ~1-2s\n- **Batch** \u2014 price an entire spreadsheet of lanes in one call, then confirm N quoted lanes in one batch book, each rendered as a single card\n- **Multi-stop** \u2014 quote and book one truck across 3+ stops\n- **Book** \u2014 book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** \u2014 real-time shipment status and full event timeline\n- **Manage** \u2014 list bookings and quotes, lane history, invoices, BOLs and PODs, saved locations and load templates\n- **Auth** \u2014 in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
   "author": {

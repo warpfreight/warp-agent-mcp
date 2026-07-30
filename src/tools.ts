@@ -913,7 +913,11 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           why,
           market_benchmark && typeof market_benchmark.verdict === "string" ? `Market: ${market_benchmark.verdict}` : "",
           rest.length ? `Alternatives: ${rest.map((r) => `${r.mode_label} ${usd(r.price_usd)}${r.transit_days ? `/${r.transit_days}d` : ""}`).join(" · ")}` : "",
-          unavailable.length ? `Not available: ${unavailable.map((u) => u.mode_label).join(", ")}` : "",
+          // Carry the REASON into the text block, not just structuredContent.
+          // Clients that render text-only otherwise saw "Not available: Cargo van"
+          // with no why, which reads as a transient failure worth retrying instead
+          // of a mode that cannot serve this lane.
+          unavailable.length ? `Not available:\n${unavailable.map((u) => `• ${u.mode_label} — ${u.reason}`).join("\n")}` : "",
           `Quote id ${winner.quote_id} — booking requires explicit confirmation.`,
         ].filter(Boolean).join("\n");
 
