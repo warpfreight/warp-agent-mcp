@@ -55,9 +55,13 @@ const clientStub = {
 registerTools(fakeServer, clientStub, () => "wak_live_FAKEKEY1234567890");
 
 console.log("== book failure handling (server-side payment model) ==");
-// Seed the session amount-cache the way a real quote would, so book gets
-// past its "re-quote first" guard and actually calls client.book().
-await handlers["ltl_quote"]({ origin_zip: "90007", destination_zip: "90038", pickup_date: "2099-01-01", pallets: 1, weight_lbs_per_pallet: 500 });
+// Deliberately do NOT quote first. This is the regression guard for the
+// serverless cache-miss bug: `book` used to refuse any quote_id that wasn't in
+// THIS process's memory, which on the hosted remote meant a caller who had just
+// quoted (on another instance) was told to re-quote. /api/v1/book resolves and
+// expiry-checks the quote server-side, so a cache miss must reach client.book()
+// and let the server decide. If someone reinstates a local session guard, the
+// "reached client.book()" assertion below fails.
 const b = await handlers["book"]({
   quote_id: "PRICING_STALE",
   pickup:   { zipCode: "90007", city: "LA", state: "CA", street: "1 A St", contactName: "T", phone: "3105551234", email: "x@y.com" },

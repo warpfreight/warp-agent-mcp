@@ -1113,13 +1113,16 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     async (params) => {
       const start = Date.now();
       try {
-        // Guard: require a quote in this session so the listItems context is
-        // cached and we fail fast with a clear "re-quote" message.
-        const quoteId = params.quote_id as string;
-        const cachedAmount = quoteAmountCache.get(quoteId);
-        if (!cachedAmount) {
-          return { content: [{ type: "text", text: `Cannot book: no quote found for ${quoteId} in this session. Quote ids are short-lived and rotate on every quote call. Run ltl_quote (or van/box-truck/ftl quote) first, then book immediately after.` }], isError: true };
-        }
+        // No session-cache precondition on purpose. /api/v1/book resolves the
+        // quote SERVER-side (`SELECT * FROM quote_cache WHERE quote_id = …`) and
+        // enforces expiry, single-use, and idempotent replay itself, so any
+        // quote id is bookable from any process. The old guard additionally
+        // required the quote to sit in THIS process's memory, which is wrong on
+        // the hosted remote: quote and book arrive as separate HTTP requests
+        // that can land on different serverless instances, so a caller who had
+        // just quoted correctly was told to re-quote. quoteAmountCache is now
+        // only an amount-display optimization (see amount_usd below); a miss
+        // costs the "$X charged" line, never the booking.
         const apiKey = WARP_API_KEY();
         if (!apiKey) {
           return { content: [{ type: "text", text: "Booking requires your own Warp account with a card on file. Quoting is free and needs no key, but booking charges your card, so you need to sign in first. New to Warp? Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
@@ -1278,14 +1281,22 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
         const rows = params.bookings as Array<Record<string, unknown>>;
 
-        // Session-cache guard: every quote_id must have been seen this session.
-        // Fails fast for the whole batch (no money charged) when ids are stale.
-        const unknown = rows
+        // No session-cache precondition (see `book` above): /api/v1/book resolves
+        // and expiry-checks each quote id server-side, so requiring the ids to be
+        // in THIS process's memory only broke legitimate bookings whose quote
+        // landed on a different serverless instance. Rows with genuinely stale or
+        // unknown ids come back as per-row failures from the batch call, which is
+        // the honest per-row outcome rather than failing the whole batch on a
+        // cache miss. Still no money moves for a row that fails.
+        //
+        // Missing ids are worth catching locally, though — that's a caller bug,
+        // not a stale quote, and it costs nothing to say so precisely.
+        const blank = rows
           .map((r, i) => ({ i, qid: String(r.quote_id ?? "") }))
-          .filter(({ qid }) => !quoteAmountCache.has(qid));
-        if (unknown.length > 0) {
-          const sample = unknown.slice(0, 3).map((u) => `row ${u.i + 1} (${u.qid})`).join(", ");
-          return { content: [{ type: "text", text: `Cannot book: ${unknown.length} of ${rows.length} quote ids are not from this session (${sample}${unknown.length > 3 ? ", …" : ""}). Quote ids rotate on every quote call. Re-run batch_quote and book immediately after.` }], isError: true };
+          .filter(({ qid }) => !qid);
+        if (blank.length > 0) {
+          const sample = blank.slice(0, 3).map((u) => `row ${u.i + 1}`).join(", ");
+          return { content: [{ type: "text", text: `Cannot book: ${blank.length} of ${rows.length} rows have no quote_id (${sample}${blank.length > 3 ? ", …" : ""}). Every row needs the quote_id returned by batch_quote.` }], isError: true };
         }
 
         // Every row needs an effective pickup + delivery (per-row OR shared).
@@ -1531,9 +1542,18 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           return { content: [{ type: "text", text: "Booking requires your own Warp account. New to Warp? Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
         }
         const quoteId = params.quote_id as string;
+        // This session-cache requirement STAYS, unlike the ones on `book` and
+        // `batch_book` that were removed. Those only asked "did I see this id?",
+        // which the server already answers. This cache holds the quoted STOP
+        // SEQUENCE, and it is the only thing that can validate the caller's
+        // stop_index values (below) — there is no server-side equivalent. Booking
+        // a leg against an unvalidated index can send a truck to the wrong stops,
+        // which is far worse than asking for a re-quote. On the hosted remote a
+        // route quoted on another instance will miss here; that is the accepted
+        // trade until an endpoint exists to fetch a multistop route by id.
         const cached = multistopRouteCache.get(quoteId);
         if (!cached) {
-          return { content: [{ type: "text", text: `Cannot book: no multi-stop quote found for ${quoteId} in this session. Quote ids are short-lived and rotate. Run multistop_quote first, then book immediately after.` }], isError: true };
+          return { content: [{ type: "text", text: `Cannot book: no multi-stop quote found for ${quoteId} in this session. Run multistop_quote in this same conversation, then book the id it returns — the stop sequence from that quote is what validates your stop_index values.` }], isError: true };
         }
         // stop_index sanity against the quoted sequence — catches an
         // off-by-one before the gateway books the wrong stops. Freight can
