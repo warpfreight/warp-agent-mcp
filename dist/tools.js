@@ -1811,6 +1811,81 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: `Login error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
         }
     });
+    // ── automate_lane / manage_automation / automation_receipts ──
+    // Recurring lane automation (standing orders). The safety contract these
+    // descriptions state is enforced server-side, not here: proposing books
+    // nothing until the OWNER approves from email, and the agent-side manage
+    // surface is stop-only. Never promise activation from chat.
+    tool("automate_lane", "Set up a RECURRING weekly shipment (standing order): describe the lane once, and after the account owner approves by email, Warp re-quotes it fresh every week and books the best option automatically while the price stays at or under the owner's ceiling. Over-ceiling weeks book nothing and notify the owner. THIS TOOL ONLY PROPOSES — nothing books now, and nothing ever books without the owner's one-time email approval. Auth required.", {
+        weekday: z.number().int().min(0).max(6).describe("Pickup day each week: 0=Sunday … 6=Saturday"),
+        ceiling_usd: z.number().positive().max(100000).describe("Max auto-booked price per shipment in USD; above this the week books nothing and the owner is emailed"),
+        criteria: z.enum(["lowest_price", "fastest_transit"]).optional().describe("How to pick the winning option each week (default lowest_price)"),
+        label: z.string().max(80).optional().describe("Human-readable lane label for the owner's emails, e.g. 'Ontario CA → Dallas TX, 6 pallets'"),
+        end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Optional YYYY-MM-DD; the automation retires itself after the last pickup on or before this date"),
+        quote: z.object({
+            origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP"),
+            destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP"),
+            pallets: z.number().int().min(1).describe("Pallet count"),
+            weight_lbs_per_pallet: z.number().positive().describe("Weight per pallet in lbs"),
+        }).passthrough().describe("Lane payload re-quoted each run — same fields as the quote tools (add length_in/width_in/height_in and commodity for firm LTL pricing). pickup_date is set automatically each week"),
+        book: z.record(z.unknown()).describe("Booking payload used each run — same shape as the book tool's pickup/delivery addresses and contacts (patch.pickup, patch.delivery). quote_id and reference are set automatically each run"),
+    }, { title: "Automate a Recurring Lane" }, async (params) => {
+        const start = Date.now();
+        try {
+            const body = {
+                weekday: params.weekday,
+                ceiling_usd: params.ceiling_usd,
+                criteria: params.criteria ?? "lowest_price",
+                quote: params.quote,
+                book: params.book,
+            };
+            if (params.label)
+                body.label = params.label;
+            if (params.end_date)
+                body.end_date = params.end_date;
+            const data = await client.proposeAutomation(body);
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'book', tool_name: 'warp_automate_lane', success: true, duration_ms: Date.now() - start });
+            const auto = (data.automation ?? {});
+            return { content: [{ type: "text", text: `Automation PROPOSED — not yet active. The account owner has been emailed an approval link; nothing books until they approve, and Warp never activates an automation from chat.\n\n` +
+                            JSON.stringify(data, null, 2) +
+                            `\n\nNext: tell the user to check the account owner's inbox. Poll with \`manage_automation\` action "status" and token "${String(auto.token ?? "")}".` }] };
+        }
+        catch (err) {
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_automate_lane', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
+    tool("manage_automation", "Check or stop a recurring lane automation. Actions: 'status' (read-only), 'pause', 'cancel' (permanent), 'skip_next' (skip one week's pickup — nothing books or charges that week). STOP-ONLY by design: there is no agent-side resume, reactivate, or ceiling change — those exist only behind the account owner's emailed approval link. Auth required.", {
+        token: z.string().describe("automation token from automate_lane (so_…)"),
+        action: z.enum(["status", "pause", "cancel", "skip_next"]).describe("status is read-only; pause/cancel/skip_next stop or shrink the automation"),
+    }, { title: "Manage an Automation" }, async (params) => {
+        const start = Date.now();
+        try {
+            const data = params.action === "status"
+                ? await client.automationStatus(params.token)
+                : await client.manageAutomation(params.token, params.action);
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'other', tool_name: 'warp_manage_automation', success: true, duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_manage_automation', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
+    tool("automation_receipts", "Authorization record for an automation's bookings: one entry per booking attempt showing the checks it passed at commit time against the owner's approval — same lane, price within ceiling, automation active, quote live — plus the shipment id it produced. Entries marked confirmation_required did NOT book autonomously; they fell back to owner confirmation. Read-only. Auth required.", {
+        token: z.string().describe("automation token from automate_lane (so_…)"),
+    }, { title: "Automation Authorization Record", readOnlyHint: true }, async (params) => {
+        const start = Date.now();
+        try {
+            const data = await client.automationReceipts(params.token);
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'list', tool_name: 'warp_automation_receipts', success: true, duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_automation_receipts', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
     // ── payment_status ───────────────────────────────────────
     tool("payment_status", "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added.", {}, { title: "Check Payment Status", readOnlyHint: true }, async () => {
         // Use the session API key passed to registerTools — never read from env/disk

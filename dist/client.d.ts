@@ -117,6 +117,14 @@ export declare class WarpClient {
     saveLoadTemplate(params: Record<string, unknown>): Promise<unknown>;
     /** DELETE /api/v1/load_templates?id=lt_... — remove a saved load config. */
     deleteLoadTemplate(id: string): Promise<unknown>;
+    /** POST /api/v1/automations — propose a recurring lane (owner approval required). */
+    proposeAutomation(params: Record<string, unknown>): Promise<unknown>;
+    /** GET /api/v1/automations?token= — status of an automation this account proposed. */
+    automationStatus(token: string): Promise<unknown>;
+    /** POST /api/v1/automations/manage — stop-only lifecycle: pause | cancel | skip_next. */
+    manageAutomation(token: string, action: string): Promise<unknown>;
+    /** GET /api/v1/automations/receipts?token= — per-booking authorization record. */
+    automationReceipts(token: string): Promise<unknown>;
     /**
      * Book a quoted shipment via the self-serve /api/v1/book endpoint.
      * Atomic: Stripe charge + gw.wearewarp.com booking in one server-side call.

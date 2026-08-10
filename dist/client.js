@@ -514,6 +514,29 @@ export class WarpClient {
     async deleteLoadTemplate(id) {
         return this._selfServe("DELETE", "/api/v1/load_templates", { query: { id } });
     }
+    // ── Recurring lane automations (auth) ─────────────────────────
+    // Wrappers over warp-site's standing-order surface. The critical contract:
+    // POST /automations only PROPOSES — nothing books until the account owner
+    // approves from the email warp-site sends them, and no agent-side call can
+    // activate, resume, or raise the ceiling (the manage endpoint is stop-only:
+    // pause | cancel | skip_next). See /api/v1/openapi.json operationIds
+    // automationPropose / automationStatus / automationManage / automationReceipts.
+    /** POST /api/v1/automations — propose a recurring lane (owner approval required). */
+    async proposeAutomation(params) {
+        return this._selfServe("POST", "/api/v1/automations", { body: params });
+    }
+    /** GET /api/v1/automations?token= — status of an automation this account proposed. */
+    async automationStatus(token) {
+        return this._selfServe("GET", "/api/v1/automations", { query: { token } });
+    }
+    /** POST /api/v1/automations/manage — stop-only lifecycle: pause | cancel | skip_next. */
+    async manageAutomation(token, action) {
+        return this._selfServe("POST", "/api/v1/automations/manage", { body: { token, action } });
+    }
+    /** GET /api/v1/automations/receipts?token= — per-booking authorization record. */
+    async automationReceipts(token) {
+        return this._selfServe("GET", "/api/v1/automations/receipts", { query: { token } });
+    }
     // ── Booking (auth) ────────────────────────────────────────────
     /**
      * Book a quoted shipment via the self-serve /api/v1/book endpoint.

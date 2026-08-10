@@ -54,6 +54,9 @@ const EXPECTED_TOOLS = [
   "multistop_book",
   "multistop_quote",
   "payment_status",
+  "automate_lane",
+  "manage_automation",
+  "automation_receipts",
   "quote_history",
   "save_load_template",
   "status",
@@ -173,7 +176,7 @@ async function main() {
   //    object schemas, never a $ref or untyped node. A shared Zod instance
   //    used to emit delivery as "$ref: #/properties/pickup", which MCP
   //    clients serialized as a string → "Expected object, received string"
-  //    and bookings on new lanes were impossible. (Reported 2026-05.)
+  //    and bookings on new lanes were impossible. (Reported 2029-05.)
   console.log("\n== book delivery schema (regression guard) ==");
   const bookTool = (list.result?.tools ?? []).find((t) => t.name === "book");
   const props = bookTool?.inputSchema?.properties ?? {};
