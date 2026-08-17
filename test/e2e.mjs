@@ -51,6 +51,8 @@ const EXPECTED_TOOLS = [
   "ltl_market_options",
   "ltl_quote",
   "compare_modes",
+  "consolidate",
+  "shipper_profile",
   "multistop_book",
   "multistop_quote",
   "payment_status",

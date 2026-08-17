@@ -2038,6 +2038,118 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
+  // ── consolidate ──────────────────────────────────────────────
+  // The money-finder: same-lane loads inside a pickup window priced as one
+  // truck vs separate LTLs. All clustering + pricing is server-side; both
+  // sides of every comparison come back as bookable quote ids, so acting on
+  // a proposal is a normal `book` call. Loads that can't consolidate return
+  // with the REASON — relay it, never hide it.
+
+  tool(
+    "consolidate",
+    "Find consolidation savings across 2-12 upcoming loads: clusters loads sharing an origin+destination zip whose pickup dates fall within window_days (default 3) that together fit one 53' dry van, then prices each cluster BOTH ways — one combined FTL vs the sum of per-load LTLs — through real quotes with bookable quote ids. Use when the user has several loads to ship this week, asks if anything can ride together, or wants to cut freight spend. Loads that can't consolidate come back with the reason (no lane partner / outside window / exceeds trailer / cluster full) — relay reasons honestly. A truck pricing above its LTLs is shown with recommended:false; don't hide it. To act on a proposal, call `book` with the consolidated truck's quote_id. Auth optional — works keyless like the quote tools.",
+    {
+      loads: z.array(z.object({
+        origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit origin ZIP"),
+        destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit destination ZIP"),
+        pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("YYYY-MM-DD"),
+        pallets: z.number().int().min(1).max(26),
+        weight_lbs_per_pallet: z.number().int().min(50).max(5000),
+        ref: z.string().max(64).optional().describe("Your reference (PO number, order id) — echoed back"),
+        length: z.number().optional().describe("Pallet length in inches (real dims firm up LTL pricing)"),
+        width: z.number().optional(),
+        height: z.number().optional().describe("Pallet height in inches — LTL prices off height above all"),
+      })).min(2).max(12).describe("The loads you plan to ship"),
+      window_days: z.number().int().min(1).max(7).optional().describe("Loads picking up within this many days of each other may ride together (default 3)"),
+    },
+    { title: "Find Consolidation Savings", readOnlyHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        const data = await client.consolidate(params as Record<string, unknown>);
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'quote',
+          tool_name: 'warp_consolidate',
+          success: true,
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_consolidate',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
+  // ── shipper_profile ──────────────────────────────────────────
+  // Context, never permission: the profile shapes what the agent should
+  // SUGGEST (usual lane, standard dims, always-needed liftgate), and nothing
+  // in it gates what the agent may do — limits live in spend policy,
+  // read-only. The derived half aggregates the account's own quotes and
+  // bookings server-side and cannot be written.
+
+  tool(
+    "shipper_profile",
+    "Read how this account actually ships — top lanes with ship counts, typical pallet count, usual pickup weekday, recent booked spend (derived server-side from the account's own quotes and bookings) plus explicit owner-set preferences: default accessorials, preferred mode, standard pallet dims, max transit days. READ THIS BEFORE asking the user questions it already answers: pre-fill their usual lane, apply their standard dims, include the liftgate they always need. Pass set_preferences to update the explicit half (merge-partial; allowlisted keys only; null clears a key). This profile is CONTEXT, NEVER PERMISSION — it never authorizes anything; spending limits live in spend policy and are read-only. Auth required.",
+    {
+      set_preferences: z.object({
+        default_accessorials: z.object({
+          pickup: z.array(z.string()).optional(),
+          delivery: z.array(z.string()).optional(),
+        }).optional().describe("Accessorial slugs to apply by default, e.g. liftgate-delivery"),
+        preferred_mode: z.enum(["ltl", "ftl", "van", "box_truck", "cheapest"]).optional(),
+        standard_pallet_dims: z.object({
+          length: z.number().int().min(12).max(96),
+          width: z.number().int().min(12).max(96),
+          height: z.number().int().min(12).max(96),
+        }).optional().describe("This shipper's standard pallet, inches"),
+        max_transit_days: z.number().int().min(1).max(14).optional(),
+        notes: z.string().max(500).optional(),
+      }).optional().describe("Omit to read. Provide to merge-update the explicit preferences."),
+    },
+    // Not readOnlyHint: set_preferences writes (a merge-update of explicit
+    // preferences — never limits, which have no write path anywhere).
+    { title: "Shipper Profile" },
+    async ({ set_preferences }) => {
+      const start = Date.now();
+      try {
+        const data = set_preferences
+          ? await client.setShipperPreferences(set_preferences as Record<string, unknown>)
+          : await client.getShipperProfile();
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: set_preferences ? 'other' : 'list',
+          tool_name: 'warp_shipper_profile',
+          success: true,
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      } catch (err) {
+        trackEvent({
+          product: 'warp-agent',
+          source: 'mcp',
+          event_type: 'error',
+          tool_name: 'warp_shipper_profile',
+          success: false,
+          error_message: errText(err),
+          duration_ms: Date.now() - start,
+        });
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
   // ── automate_lane / manage_automation / automation_receipts ──
   // Recurring lane automation (standing orders). The safety contract these
   // descriptions state is enforced server-side, not here: proposing books

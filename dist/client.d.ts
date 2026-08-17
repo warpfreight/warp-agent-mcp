@@ -143,5 +143,8 @@ export declare class WarpClient {
     rateCard(): Promise<unknown>;
     multistopQuote(params: Record<string, unknown>): Promise<unknown>;
     multistopBook(params: Record<string, unknown>): Promise<unknown>;
+    consolidate(params: Record<string, unknown>): Promise<unknown>;
+    getShipperProfile(): Promise<unknown>;
+    setShipperPreferences(prefs: Record<string, unknown>): Promise<unknown>;
     status(): Promise<unknown>;
 }

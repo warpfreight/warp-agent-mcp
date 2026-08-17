@@ -548,9 +548,9 @@ export class WarpClient {
   // Hit the warp-site self-serve routes directly with Bearer auth, like quote/book
   // (NOT the /warp gw proxy that `request()` uses).
   private async _selfServe(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
-    opts?: { body?: unknown; query?: Record<string, string> },
+    opts?: { body?: unknown; query?: Record<string, string>; timeoutMs?: number },
   ): Promise<unknown> {
     const key = this.getApiKey();
     let url = `${this.selfServeOrigin}${path}`;
@@ -561,7 +561,7 @@ export class WarpClient {
       method,
       headers,
       body: opts?.body ? JSON.stringify(opts.body) : undefined,
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(opts?.timeoutMs ?? 25000),
     });
     const text = await res.text();
     let json: unknown;
@@ -789,6 +789,29 @@ export class WarpClient {
     // list_items[] }. tools.ts builds the legs; this is a passthrough.
     return this._selfServe("POST", "/api/v1/multistop/book", {
       body: { quote_id: params.quote_id, shipments: params.shipments },
+    });
+  }
+
+  // ── Consolidation finder (auth optional, like quoting) ────────
+  // Fans out up to ~18 upstream quotes server-side, so it gets a longer
+  // timeout than the single-quote calls.
+
+  consolidate(params: Record<string, unknown>) {
+    return this._selfServe("POST", "/api/v1/consolidate", {
+      body: params,
+      timeoutMs: 110000,
+    });
+  }
+
+  // ── Shipper profile (auth) ────────────────────────────────────
+
+  getShipperProfile() {
+    return this._selfServe("GET", "/api/v1/agents/profile");
+  }
+
+  setShipperPreferences(prefs: Record<string, unknown>) {
+    return this._selfServe("PUT", "/api/v1/agents/profile", {
+      body: { preferences: prefs },
     });
   }
 
