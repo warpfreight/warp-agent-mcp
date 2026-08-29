@@ -249,6 +249,53 @@ async function logQuote(apiKey: string | undefined, quoteId: string, originZip: 
   } catch { /* non-fatal */ }
 }
 
+/* ── analytics helpers (ported from warp-site PR #3386) ───────────────────
+   The /bookings payload is untyped and has changed shape before, so these
+   read defensively: find the key that is actually there, and let the caller
+   report honestly when none is. Guessing a field name and emitting 0 would
+   turn "I could not tell" into "you spent nothing". */
+function pickRows(raw: unknown): Record<string, unknown>[] {
+  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+  if (raw && typeof raw === "object") {
+    for (const key of ["bookings", "data", "results", "items", "shipments"]) {
+      const v = (raw as Record<string, unknown>)[key];
+      if (Array.isArray(v)) return v as Record<string, unknown>[];
+    }
+  }
+  return [];
+}
+function firstKeyPresent(rows: Record<string, unknown>[], candidates: string[]): string | null {
+  for (const key of candidates) {
+    if (rows.some((r) => r[key] !== undefined && r[key] !== null && r[key] !== "")) return key;
+  }
+  return null;
+}
+function anToNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/[$,\s]/g, ""));
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+function stringish(v: unknown): string | null {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (typeof v === "number") return String(v);
+  return null;
+}
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+function tally(rows: Record<string, unknown>[], key: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const k = stringish(r[key]);
+    if (!k) continue;
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
 export function registerTools(server: McpServer, client: WarpClient, getApiKey: () => string | undefined) {
   // Called fresh on every tool invocation — picks up CLI login/signup without MCP restart
   const WARP_API_KEY = getApiKey;
@@ -2276,16 +2323,117 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   tool(
     "analytics",
-    "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli). Use this to track how much revenue has been generated through AI tools.",
-    {},
-    { title: "View Analytics", readOnlyHint: true },
-    async () => {
+    "Summarise your own shipping history: how many shipments, what you spent, and the split by mode, status and lane over a window. Aggregates the same bookings `list_bookings` returns, so an agent gets the answer in one call instead of pulling the list and adding it up. Auth required.",
+    {
+      limit: z.number().int().min(1).max(500).optional().describe("How many of your most recent bookings to summarise (default 100, max 500)"),
+      group_by: z.enum(["mode", "status", "lane"]).optional().describe("Which breakdown to lead with. All three are returned regardless; this only orders the response."),
+    },
+    { title: "Summarise Shipping History", readOnlyHint: true },
+    async (params) => {
       const apiKey = WARP_API_KEY();
       if (!apiKey) {
-        return { content: [{ type: "text", text: "No API key found. Run warp-agent login first." }], isError: true };
+        return { content: [{ type: "text", text: "No API key found. Connect your Warp account to this connector (or run warp-agent login for the local install)." }], isError: true };
       }
-      const analytics = getAnalytics();
-      return { content: [{ type: "text", text: JSON.stringify(analytics, null, 2) }] };
+      try {
+        const raw = await client.listBookings(params.limit ?? 100);
+        const rows = pickRows(raw);
+
+        // Nothing to summarise is a real answer, not an error.
+        if (rows.length === 0) {
+          return { content: [{ type: "text", text: JSON.stringify({ shipments: 0, note: "No bookings found on this account for the requested window." }, null, 2) }] };
+        }
+
+        // Every metric is derived from keys PROVED present on the rows rather
+        // than assumed. A metric we cannot compute is reported as unavailable
+        // with the reason — never as a zero, which would read as "you spent
+        // nothing" instead of "I could not tell".
+        const spendKey = firstKeyPresent(rows, ["amount_usd", "total_usd", "price_usd", "amount", "total", "price"]);
+        const modeKey = firstKeyPresent(rows, ["mode", "service_mode", "equipment", "service"]);
+        const statusKey = firstKeyPresent(rows, ["status", "state", "shipment_status"]);
+        const originKey = firstKeyPresent(rows, ["origin_zip", "origin", "from_zip", "pickup_zip"]);
+        const destKey = firstKeyPresent(rows, ["destination_zip", "destination", "to_zip", "dropoff_zip"]);
+        const dateKey = firstKeyPresent(rows, ["created_at", "booked_at", "pickup_date", "date"]);
+
+        const unavailable: string[] = [];
+        const summary: Record<string, unknown> = { shipments: rows.length };
+
+        if (spendKey) {
+          const amounts = rows.map((r) => anToNumber(r[spendKey])).filter((n): n is number => n !== null);
+          if (amounts.length > 0) {
+            const total = amounts.reduce((a, b) => a + b, 0);
+            summary.spend = {
+              total: round2(total),
+              average_per_shipment: round2(total / amounts.length),
+              largest: round2(Math.max(...amounts)),
+              smallest: round2(Math.min(...amounts)),
+              counted: amounts.length,
+              ...(amounts.length < rows.length
+                ? { note: `${rows.length - amounts.length} booking(s) had no readable amount and are excluded from spend.` }
+                : {}),
+              source_field: spendKey,
+            };
+          } else {
+            unavailable.push(`spend — field "${spendKey}" is present but held no numeric values`);
+          }
+        } else {
+          unavailable.push("spend — no amount field on these bookings");
+        }
+
+        if (modeKey) summary.by_mode = tally(rows, modeKey);
+        else unavailable.push("by_mode — no mode field on these bookings");
+
+        if (statusKey) summary.by_status = tally(rows, statusKey);
+        else unavailable.push("by_status — no status field on these bookings");
+
+        if (originKey && destKey) {
+          const lanes = new Map<string, number>();
+          for (const r of rows) {
+            const o = stringish(r[originKey]);
+            const d = stringish(r[destKey]);
+            if (!o || !d) continue;
+            const k = `${o} -> ${d}`;
+            lanes.set(k, (lanes.get(k) ?? 0) + 1);
+          }
+          if (lanes.size > 0) {
+            summary.top_lanes = [...lanes.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([lane, shipments]) => ({ lane, shipments }));
+            summary.distinct_lanes = lanes.size;
+          } else {
+            unavailable.push("top_lanes — origin/destination fields were present but empty");
+          }
+        } else {
+          unavailable.push("top_lanes — no origin/destination fields on these bookings");
+        }
+
+        if (dateKey) {
+          const times = rows
+            .map((r) => Date.parse(String(r[dateKey] ?? "")))
+            .filter((t) => Number.isFinite(t));
+          if (times.length > 0) {
+            summary.window = {
+              earliest: new Date(Math.min(...times)).toISOString().slice(0, 10),
+              latest: new Date(Math.max(...times)).toISOString().slice(0, 10),
+              source_field: dateKey,
+            };
+          }
+        }
+
+        if (unavailable.length > 0) summary.unavailable = unavailable;
+        summary.basis = `Aggregated from your ${rows.length} most recent booking(s) via /bookings. Figures cover those bookings only, not your whole account history.`;
+
+        const ordered =
+          params.group_by === "status"
+            ? { shipments: summary.shipments, by_status: summary.by_status, ...summary }
+            : params.group_by === "lane"
+              ? { shipments: summary.shipments, top_lanes: summary.top_lanes, ...summary }
+              : summary;
+
+        return { content: [{ type: "text", text: JSON.stringify(ordered, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
     },
   );
 
