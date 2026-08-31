@@ -25,12 +25,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24 # ships npm 11.x; trusted publishing needs npm >= 11.5.1
           registry-url: "https://registry.npmjs.org"
 
-      # Trusted publishing needs npm >= 11.5.1; node 22 ships an older npm.
-      - name: Upgrade npm
-        run: npm install -g npm@latest
+      # Belt-and-suspenders, then prove the version is OIDC-capable.
+      - name: Ensure npm >= 11.5.1
+        run: |
+          npm install -g npm@latest
+          node --version
+          npm --version
 
       # Skip lifecycle scripts on install: postinstall.mjs targets a local
       # Claude Desktop config and is irrelevant (and noisy) in CI.
