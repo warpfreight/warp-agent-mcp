@@ -1,0 +1,51 @@
+name: Publish to npm (Trusted Publishing)
+
+# Publishes warp-agent-mcp to npm via GitHub OIDC — no token, no OTP.
+# Requires a one-time "Trusted Publisher" entry on npmjs.com:
+#   Packages > warp-agent-mcp > Settings > Trusted publishing
+#   Publisher: GitHub Actions | org: warpfreight | repo: warp-agent-mcp
+#   Workflow filename: publish.yml
+# Run it from the Actions tab ("Run workflow") or by pushing a v* tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # lets setup-node do the OIDC handshake npm trusts
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm >= 11.5.1; node 22 ships an older npm.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      # Skip lifecycle scripts on install: postinstall.mjs targets a local
+      # Claude Desktop config and is irrelevant (and noisy) in CI.
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      # Same drift guard prepublishOnly runs, made explicit here since we
+      # publish with --ignore-scripts below.
+      - name: Guard description against tool-count drift
+        run: node scripts/check-description.mjs
+
+      # OIDC auth is automatic (id-token: write + trusted publisher configured).
+      # Provenance is attached automatically; no --provenance needed.
+      - name: Publish
+        run: npm publish --ignore-scripts
