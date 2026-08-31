@@ -37,8 +37,16 @@ const desc = String(pkg.description ?? "");
 const m = desc.match(/(\d+)\s+tools\b/i);
 const stated = m ? Number(m[1]) : null;
 
-if (stated === null && !process.env.REQUIRE_TOOL_COUNT) {
-  console.log("[check-description] OK: description states no tool count (nothing to drift).");
+// The README prose has drifted independently of package.json (it said "26 tools"
+// while the package shipped 31). Guard every "N tools" claim in it too.
+let readmeCounts = [];
+try {
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  readmeCounts = [...readme.matchAll(/(\d+)\s+tools\b/gi)].map((x) => Number(x[1]));
+} catch { /* no README in this checkout — skip */ }
+
+if (stated === null && readmeCounts.length === 0 && !process.env.REQUIRE_TOOL_COUNT) {
+  console.log("[check-description] OK: no tool count stated in description or README (nothing to drift).");
   process.exit(0);
 }
 
@@ -98,14 +106,22 @@ try {
 
 if (!Number.isInteger(roster) || roster < 1) fail(`roster probe returned a bogus count (${roster}).`);
 
-if (stated === null) {
-  // REQUIRE_TOOL_COUNT was set but the description states no number.
+// package.json description: verify only if it states a number.
+if (stated !== null && stated !== roster) {
+  fail(`package.json description says "${stated} tools" but the server registers ${roster}. Fix it (or drop the number).`);
+}
+if (stated === null && process.env.REQUIRE_TOOL_COUNT) {
   fail(`REQUIRE_TOOL_COUNT is set but the description states no "N tools" count. Roster is ${roster}.`);
 }
 
-if (stated !== roster) {
-  fail(`description says "${stated} tools" but the server registers ${roster}. Fix the description (or drop the number).`);
+// README prose: every "N tools" claim must match the roster.
+const badReadme = readmeCounts.filter((n) => n !== roster);
+if (badReadme.length) {
+  fail(`README.md says "${badReadme[0]} tools" but the server registers ${roster}. Fix the README (or drop the number).`);
 }
 
-console.log(`[check-description] OK: description "${stated} tools" matches the ${roster}-tool roster.`);
+const parts = [];
+if (stated !== null) parts.push(`description "${stated} tools"`);
+if (readmeCounts.length) parts.push(`README "${roster} tools"`);
+console.log(`[check-description] OK: ${parts.length ? parts.join(" + ") + " match" : "no stated count contradicts"} the ${roster}-tool roster.`);
 process.exit(0);

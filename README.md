@@ -34,7 +34,7 @@ transaction**, not just the lookup:
 
 ## What it does
 
-26 tools that let an AI agent talk to your Warp account:
+31 tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
@@ -68,6 +68,24 @@ transaction**, not just the lookup:
 _Removed in 0.5.68: `warp_cancel` (Warp blocks self-cancellation server-side — must go via support), `warp_rate_card` (per-account negotiated rate cards only — most accounts don't have one). `multistop_quote` + `multistop_book` were also removed in 0.5.68 and re-added in 0.14.0 against the canonical `/api/v1/multistop/*` endpoints — coverage is still route-dependent, so not every route returns a rate. Contact support@wearewarp.com if you need either of the removed tools._
 
 ## Install
+
+### Hosted connector — recommended, no install
+
+Paste this URL into your AI client's custom connector settings and sign in with
+Warp:
+
+```
+https://mcp.wearewarp.com/api/mcp
+```
+
+No install, no API key, no config file. Sign in once (OAuth) and the full
+toolset appears. Works in Claude.ai, Claude Desktop, and Claude Code. This is the
+primary way to use Warp.
+
+### CLI — local install with your own key
+
+For clients without a custom-connector UI (Cursor, Windsurf, Continue), or if
+you'd rather hold a local `wak_live_*` key:
 
 ```bash
 npm install -g @warpfreight/cli-agent

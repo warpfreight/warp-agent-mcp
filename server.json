@@ -7,21 +7,21 @@
     "url": "https://github.com/warpfreight/warp-agent-mcp",
     "source": "github"
   },
-  "version": "0.19.1",
+  "version": "0.19.2",
   "websiteUrl": "https://wearewarp.com",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "warp-agent-mcp",
-      "version": "0.19.1",
+      "version": "0.19.2",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "WARP_API_KEY",
-          "description": "Warp API key (wak_live_* or wak_test_*). Optional \u2014 the package prefers ~/.warp/config.json populated by `warp-agent signup` or `warp-agent login`.",
+          "description": "Warp API key (wak_live_* or wak_test_*). Optional — the package prefers ~/.warp/config.json populated by `warp-agent signup` or `warp-agent login`.",
           "isRequired": false,
           "isSecret": true
         },
