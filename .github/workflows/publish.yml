@@ -23,10 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # NOTE: intentionally NO registry-url. setup-node's registry-url writes an
+      # .npmrc pinning always-auth + an empty _authToken, which forces (failed)
+      # token auth and suppresses OIDC. Without it, npm 11.5.1+ with id-token
+      # does trusted publishing against the default registry (registry.npmjs.org).
       - uses: actions/setup-node@v4
         with:
           node-version: 24 # ships npm 11.x; trusted publishing needs npm >= 11.5.1
-          registry-url: "https://registry.npmjs.org"
 
       # Belt-and-suspenders, then prove the version is OIDC-capable.
       - name: Ensure npm >= 11.5.1
