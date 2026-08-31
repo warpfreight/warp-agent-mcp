@@ -8,6 +8,7 @@ export declare class WarpApiError extends Error {
     body: unknown;
     constructor(status: number, body: unknown);
 }
+export declare const USER_AGENT = "warp-agent-mcp/0.19.1";
 export declare class WarpClient {
     private base;
     private getApiKey;

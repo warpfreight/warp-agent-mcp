@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WarpApiError } from "./client.js";
+import { WarpApiError, USER_AGENT } from "./client.js";
 import { trackEvent, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, isCanadianPostal, coverageGapRefusal } from "./policy.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, renderQuoteCard, toWidgetData, } from "./widgets/quote-card.js";
@@ -208,7 +208,7 @@ async function logQuote(apiKey, quoteId, originZip, destZip, mode, priceCents, p
     try {
         await fetch("https://www.wearewarp.com/api/v1/freight/quote-log", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+            headers: { "user-agent": USER_AGENT, "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
             body: JSON.stringify({ quoteId, originZip, destZip, mode, priceCents, pallets }),
         });
     }
@@ -1637,7 +1637,7 @@ export function registerTools(server, client, getApiKey) {
         const start = Date.now();
         try {
             // Hit www.wearewarp.com/api/v1/version (not gw) — gw requires different auth on /version
-            const res = await fetch("https://www.wearewarp.com/api/v1/version", { signal: AbortSignal.timeout(5000) });
+            const res = await fetch("https://www.wearewarp.com/api/v1/version", { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(5000) });
             const version = await res.json();
             // Validate API key by hitting a gw endpoint that requires auth
             let keyStatus = null;
@@ -1773,7 +1773,7 @@ export function registerTools(server, client, getApiKey) {
         const start = Date.now();
         try {
             const res = await fetch("https://www.wearewarp.com/api/v1/freight/quote-log", {
-                headers: { "Authorization": `Bearer ${WARP_API_KEY() ?? ""}` },
+                headers: { "user-agent": USER_AGENT, "Authorization": `Bearer ${WARP_API_KEY() ?? ""}` },
             });
             if (!res.ok)
                 throw new Error(`HTTP ${res.status}`);
@@ -1801,7 +1801,7 @@ export function registerTools(server, client, getApiKey) {
         try {
             const CUSTOMER_URL = "https://customer.wearewarp.com";
             const ts = new Date().toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
-            const headers = { "Content-Type": "application/json", "app": `4;0.1.362;${ts}`, "Origin": CUSTOMER_URL };
+            const headers = { "user-agent": USER_AGENT, "Content-Type": "application/json", "app": `4;0.1.362;${ts}`, "Origin": CUSTOMER_URL };
             // Step 1: Login via customer portal to get JWT
             const authRes = await fetch(`${CUSTOMER_URL}/api/auth/login`, {
                 method: "POST", headers,
@@ -1848,7 +1848,7 @@ export function registerTools(server, client, getApiKey) {
             writeFileSync(join(dir, "config.json"), JSON.stringify({ api_key: rawKey, email: params.email }, null, 2));
             // Step 4: Check payment status
             const meRes = await fetch("https://www.wearewarp.com/api/v1/agents/me", {
-                headers: { "Authorization": `Bearer ${rawKey}`, "Content-Type": "application/json" },
+                headers: { "user-agent": USER_AGENT, "Authorization": `Bearer ${rawKey}`, "Content-Type": "application/json" },
                 signal: AbortSignal.timeout(5000),
             });
             let hasCard = false;
@@ -2048,7 +2048,7 @@ export function registerTools(server, client, getApiKey) {
         }
         try {
             const res = await fetch("https://www.wearewarp.com/api/v1/agents/me", {
-                headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+                headers: { "user-agent": USER_AGENT, "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
                 signal: AbortSignal.timeout(5000),
             });
             if (!res.ok) {

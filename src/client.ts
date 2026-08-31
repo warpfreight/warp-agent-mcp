@@ -11,8 +11,10 @@ export class WarpApiError extends Error {
   }
 }
 
-const CLIENT_VERSION = "0.3.0";
-const USER_AGENT = `warp-agent-mcp/${CLIENT_VERSION}`;
+const CLIENT_VERSION = "0.19.1";
+// Distinctive UA so MCP traffic is self-identifying server-side (attribution).
+// Exported so the tool-layer fetches (login/apikey/quote-log/version/me) send it too.
+export const USER_AGENT = `warp-agent-mcp/${CLIENT_VERSION}`;
 
 /** Freight details captured at quote time, replayed at book time so the
  *  atomic /freight/book call matches what was quoted. */
@@ -89,10 +91,12 @@ export class WarpClient {
 
   private headers(auth: boolean): Record<string, string> {
     const h: Record<string, string> = {
+      // Default UA first so a caller-supplied extraHeaders() user-agent (e.g. the
+      // hosted connector identifying as warp-mcp-remote/*) can still override it.
+      "user-agent": USER_AGENT,
       ...this.extraHeaders(),
       "content-type": "application/json",
       accept: "application/json",
-      "user-agent": USER_AGENT,
     };
     if (auth) {
       const key = this.getApiKey();
@@ -204,7 +208,7 @@ export class WarpClient {
     const url = `${this.selfServeOrigin}/api/v1/${mode}/quote`;
     const body = this.buildQuoteBody(params);
 
-    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
 
     const res = await fetch(url, {
@@ -302,7 +306,7 @@ export class WarpClient {
     key: string | undefined,
   ): Promise<unknown[]> {
     const url = `${this.selfServeOrigin}/api/v1/ltl/market-options`;
-    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(url, {
       method: "POST", headers, body: JSON.stringify(body),
@@ -342,7 +346,7 @@ export class WarpClient {
     const assumedDimFields = (["length_in", "width_in", "height_in"] as const)
       .filter((k) => !(Number(params[k]) > 0));
     const key = this.getApiKey();
-    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(`${this.selfServeOrigin}/api/v1/quote`, {
       method: "POST",
@@ -555,7 +559,7 @@ export class WarpClient {
     const key = this.getApiKey();
     let url = `${this.selfServeOrigin}${path}`;
     if (opts?.query) url += `?${new URLSearchParams(opts.query).toString()}`;
-    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
     const res = await fetch(url, {
       method,
@@ -663,7 +667,7 @@ export class WarpClient {
     if (params.pickup_window)   body.pickup_window   = params.pickup_window;
     if (params.delivery_window) body.delivery_window = params.delivery_window;
 
-    const headers: Record<string, string> = { ...this.extraHeaders(), "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
 
     const res = await fetch(url, {
