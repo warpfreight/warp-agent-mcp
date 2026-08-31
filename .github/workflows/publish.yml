@@ -48,13 +48,8 @@ jobs:
       - name: Guard description against tool-count drift
         run: node scripts/check-description.mjs
 
-      - name: Debug OIDC availability
-        run: |
-          echo "OIDC request URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+YES}"
-          echo "repository.url: $(node -p "require('./package.json').repository.url")"
-          echo "npm: $(npm --version)"
-
-      # OIDC auth is automatic (id-token: write + trusted publisher configured).
-      # Provenance is attached automatically; no --provenance needed.
+      # OIDC auth is automatic (id-token: write + the Trusted Publisher configured
+      # on npmjs.com: warpfreight/warp-agent-mcp, publish.yml, action "npm publish").
+      # Provenance is attached automatically; no token, no OTP, no --provenance.
       - name: Publish
-        run: npm publish --ignore-scripts --loglevel=verbose
+        run: npm publish --ignore-scripts
