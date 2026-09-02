@@ -296,6 +296,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const commodityIssue = checkCommodity(params.commodity);
+            if (commodityIssue)
+                return { content: [{ type: "text", text: commodityIssue }], isError: true };
             const data = await client.vanQuote(params);
             // Cache all option amounts for booking
             const _vwid = data?.warp_quote_id;
@@ -348,6 +351,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const commodityIssue = checkCommodity(params.commodity);
+            if (commodityIssue)
+                return { content: [{ type: "text", text: commodityIssue }], isError: true };
             const data = await client.boxTruckQuote(params);
             const _bwid = data?.warp_quote_id;
             const _bwamt = data?.warp_price;
@@ -398,6 +404,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadaLane) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const commodityIssue = checkCommodity(params.commodity);
+            if (commodityIssue)
+                return { content: [{ type: "text", text: commodityIssue }], isError: true };
             const data = await client.ftlQuote(params);
             const _fwid = data?.warp_quote_id;
             const _fwamt = data?.warp_price;
@@ -455,6 +464,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const commodityIssue = checkCommodity(params.commodity);
+            if (commodityIssue)
+                return { content: [{ type: "text", text: commodityIssue }], isError: true };
             const data = await client.ltlQuote(params, params.origin_zip, params.destination_zip);
             // Cache Warp quote amount
             const qid = data?.warp_quote_id;
@@ -525,6 +537,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const commodityIssue = checkCommodity(params.commodity);
+            if (commodityIssue)
+                return { content: [{ type: "text", text: commodityIssue }], isError: true };
             // Fire Warp quote + carrier spread in parallel. Total latency ≈ slow (~15s).
             const [warpRaw, marketOptions] = await Promise.all([
                 client.ltlQuote(params, params.origin_zip, params.destination_zip).catch(() => ({})),
@@ -967,6 +982,9 @@ export function registerTools(server, client, getApiKey) {
                 if (isCanadianPostal(o) || isCanadianPostal(d)) {
                     return { content: [{ type: "text", text: "Warp only services US domestic shipments. Remove non-US lanes and try again." }], isError: true };
                 }
+                const commodityIssue = checkCommodity(lane.commodity);
+                if (commodityIssue)
+                    return { content: [{ type: "text", text: `Lane with commodity "${String(lane.commodity)}": ${commodityIssue}` }], isError: true };
             }
             const results = await client.batchQuote(rawLanes);
             // Cache each priced lane's quote_id → amount so book can log revenue.
@@ -1013,7 +1031,7 @@ export function registerTools(server, client, getApiKey) {
     // (Reported by a Claude API user 2026-05; do not collapse these back into
     // one shared schema.)
     const pickupSchema = z.object({
-        zipCode: z.string().describe("5-digit ZIP"),
+        zipCode: z.string().regex(/^\d{5}$/).describe("5-digit ZIP"),
         city: z.string().describe("City name"),
         state: z.string().describe("2-letter state code"),
         street: z.string().describe("Street address"),
@@ -1023,7 +1041,7 @@ export function registerTools(server, client, getApiKey) {
         specialInstruction: z.string().optional().describe("Special instructions"),
     });
     const deliverySchema = z.object({
-        zipCode: z.string().describe("5-digit ZIP"),
+        zipCode: z.string().regex(/^\d{5}$/).describe("5-digit ZIP"),
         city: z.string().describe("City name"),
         state: z.string().describe("2-letter state code"),
         street: z.string().describe("Street address"),
@@ -1062,6 +1080,14 @@ export function registerTools(server, client, getApiKey) {
             const apiKey = WARP_API_KEY();
             if (!apiKey) {
                 return { content: [{ type: "text", text: "Booking requires your own Warp account with a card on file. Quoting is free and needs no key, but booking charges your card, so you need to sign in first. New to Warp? Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent signup'. Already have an account? Run 'warp-agent login'." }], isError: true };
+            }
+            // Domestic-only guard: refuse Canadian pickup/delivery ZIPs before we
+            // charge a card, matching the quote tools. Addresses are optional here
+            // (a saved default shipper fills them in server-side), so only check
+            // the ones the caller actually supplied.
+            if ((params.pickup && isCanadianPostal(params.pickup.zipCode)) ||
+                (params.delivery && isCanadianPostal(params.delivery.zipCode))) {
+                return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
             // /api/v1/book is atomic: Stripe charge + gw booking in one call.
             // No separate charge-me step needed; payment is handled server-side.
@@ -1158,12 +1184,12 @@ export function registerTools(server, client, getApiKey) {
         bookings: z.array(z.object({
             quote_id: z.string().describe("Quote ID from a previous quote tool. Must be from THIS session — quote ids expire and rotate, so quote → book back-to-back."),
             pickup: z.object({
-                zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+                zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
                 contactName: z.string(), phone: z.string(), email: z.string(),
                 specialInstruction: z.string().optional(),
             }).optional().describe("Per-row pickup. Omit to inherit from shared_pickup."),
             delivery: z.object({
-                zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+                zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
                 contactName: z.string(), phone: z.string(),
                 email: z.string().optional(),
                 specialInstruction: z.string().optional(),
@@ -1178,12 +1204,12 @@ export function registerTools(server, client, getApiKey) {
             delivery_window: z.object({ from: z.string(), to: z.string() }).optional(),
         })).min(1).max(25).describe("Array of bookings to confirm (1-25). Each is one freight shipment, one card charge."),
         shared_pickup: z.object({
-            zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+            zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
             contactName: z.string(), phone: z.string(), email: z.string(),
             specialInstruction: z.string().optional(),
         }).optional().describe("Pickup address applied to every row that doesn't supply its own (FBA case: one warehouse → many destinations)."),
         shared_delivery: z.object({
-            zipCode: z.string(), city: z.string(), state: z.string(), street: z.string(),
+            zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
             contactName: z.string(), phone: z.string(),
             email: z.string().optional(),
             specialInstruction: z.string().optional(),
@@ -1231,6 +1257,22 @@ export function registerTools(server, client, getApiKey) {
             if (missing.length > 0) {
                 const which = missing.slice(0, 3).map((m) => `row ${m.i + 1} (${[!m.hasPickup && "pickup", !m.hasDelivery && "delivery"].filter(Boolean).join(" + ")})`).join(", ");
                 return { content: [{ type: "text", text: `Cannot book: ${missing.length} of ${rows.length} rows are missing addresses (${which}${missing.length > 3 ? ", …" : ""}). Either set shared_pickup / shared_delivery for the common warehouse, or fill in per-row pickup/delivery for those rows.` }], isError: true };
+            }
+            // Domestic-only guard: refuse Canadian pickup/delivery ZIPs on any row
+            // (per-row or inherited shared address) before charging any card,
+            // matching the quote tools.
+            const intl = rows
+                .map((r, i) => {
+                const pickup = (r.pickup ?? sharedPickup);
+                const delivery = (r.delivery ?? sharedDelivery);
+                const badPickup = !!pickup && isCanadianPostal(String(pickup.zipCode ?? ""));
+                const badDelivery = !!delivery && isCanadianPostal(String(delivery.zipCode ?? ""));
+                return { i, badPickup, badDelivery };
+            })
+                .filter((m) => m.badPickup || m.badDelivery);
+            if (intl.length > 0) {
+                const which = intl.slice(0, 3).map((m) => `row ${m.i + 1}`).join(", ");
+                return { content: [{ type: "text", text: `Warp only services US domestic shipments. International shipping is not available. Non-US addresses on ${which}${intl.length > 3 ? ", …" : ""}.` }], isError: true };
             }
             const shared = {
                 pickup: sharedPickup,
@@ -1464,6 +1506,21 @@ export function registerTools(server, client, getApiKey) {
                 leg.pickup_info.stop_index >= leg.delivery_info.stop_index);
             if (badLeg !== -1) {
                 return { content: [{ type: "text", text: `Cannot book: shipments[${badLeg}] has an invalid stop_index. The quoted route has ${cached.stops.length} stops (0..${maxIndex}: ${cached.stops.join(" → ")}); each leg needs pickup_info.stop_index < delivery_info.stop_index within that range.` }], isError: true };
+            }
+            // ZIP-match guard: each leg's submitted address.zipcode MUST match the
+            // ZIP quoted for that stop_index. Otherwise a caller could keep a valid
+            // stop_index but ship to a different address than what was priced,
+            // sending the truck somewhere the route never quoted.
+            for (let li = 0; li < legs.length; li++) {
+                const leg = legs[li];
+                for (const side of ["pickup_info", "delivery_info"]) {
+                    const info = leg[side];
+                    const expected = cached.stops[info.stop_index];
+                    const submitted = String(info.address?.zipcode ?? "").trim();
+                    if (expected !== undefined && submitted !== expected) {
+                        return { content: [{ type: "text", text: `Cannot book: shipments[${li}].${side} zipcode ${submitted || "(missing)"} does not match the quoted stop at stop_index ${info.stop_index} (expected ${expected}). Book each leg against the same ZIPs that were quoted, or re-quote the corrected route.` }], isError: true };
+                    }
+                }
             }
             let data;
             try {

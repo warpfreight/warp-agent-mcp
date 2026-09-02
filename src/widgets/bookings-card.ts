@@ -318,7 +318,7 @@ window.__warpRenderBookings = function(data) {
   var EXTLINK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg>';
 
   function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c];}); }
-  function cityState(c,st){ var a=[]; if(c)a.push(c); if(st)a.push(st); return a.join(", "); }
+  function cityState(c,st){ var a=[]; if(c)a.push(esc(c)); if(st)a.push(esc(st)); return a.join(", "); }
   function fmtDate(s){ if(!s) return "--"; try{ return new Date(s).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});}catch(e){return s;} }
   function fmtWin(from,to,tz){
     if(!from) return "";
