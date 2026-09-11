@@ -9,6 +9,16 @@ export declare class WarpApiError extends Error {
     constructor(status: number, body: unknown);
 }
 export declare const USER_AGENT = "warp-agent-mcp/0.19.1";
+/** Multi-carrier LTL spread plus the timeout signals the market-options route
+ *  returns when its carrier poll times out (retryable + a human note + a
+ *  last-good cached spread). The caller surfaces these instead of dropping the
+ *  comparison to zero rows. */
+export interface MarketOptionsResult {
+    options: unknown[];
+    retryable?: boolean;
+    cached?: boolean;
+    note?: string;
+}
 export declare class WarpClient {
     private base;
     private getApiKey;
@@ -50,7 +60,7 @@ export declare class WarpClient {
     private get selfServeOrigin();
     private buildQuoteBody;
     private _selfServeQuote;
-    ltlMarketOptions(params: Record<string, unknown>): Promise<unknown[]>;
+    ltlMarketOptions(params: Record<string, unknown>): Promise<MarketOptionsResult>;
     private _ltlMarketOptions;
     /**
      * All four modes in ONE upstream call via the public keyless all-modes

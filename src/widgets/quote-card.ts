@@ -55,6 +55,11 @@ export interface QuoteWidgetData {
   // rows + a "finding other carrier rates…" footer — used by warp_ltl_quote
   // to signal that warp_ltl_market_options is the natural follow-up call.
   loading_market?: boolean;
+  // When true and `marketplace` is empty, the carrier sweep timed out. The card
+  // shows a "timed out — retry" note instead of collapsing to a book prompt.
+  market_timeout?: boolean;
+  // Human-readable note from the market-options route on a timeout.
+  market_note?: string;
 }
 
 export const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
@@ -126,6 +131,8 @@ export function toWidgetData(
     warp_count: 1,
     marketplace_count: marketplaceAll.length,
     loading_market: mode === "ltl" && marketplaceAll.length === 0 && response.loading_market === true,
+    market_timeout: mode === "ltl" && marketplaceAll.length === 0 && response.market_timeout === true,
+    market_note: typeof response.market_note === "string" ? response.market_note : undefined,
   };
 }
 
@@ -242,6 +249,12 @@ html, body {
   display: flex; align-items: center; justify-content: center; gap: 7px;
   padding: 11px 16px 6px; color: var(--muted); font-size: 12px; font-weight: 500;
 }
+/* Carrier sweep timed out: a calm, static note (no shimmer, no pulse) telling
+   the user the comparison can be retried. The Warp headline row still shows. */
+.wm-timeout {
+  padding: 12px 16px; border-top: 1px solid var(--line2);
+  color: var(--muted); font-size: 12.5px; line-height: 1.45; text-align: center;
+}
 .wm-loading-dot {
   width: 6px; height: 6px; border-radius: 999px; background: var(--accent);
   animation: warpPulse 1.2s ease-in-out infinite;
@@ -332,6 +345,11 @@ window.__warpRenderCard = function(data) {
     }
     h += '<div class="wm-loading-note"><span class="wm-loading-dot"></span>Finding 30+ more carrier rates &#183; ~15s</div>';
     h += '</div>';
+  } else if (data.market_timeout) {
+    // Carrier sweep timed out. Don't collapse to a bare book prompt — show the
+    // route's note (or a default) so the comparison reads as retryable.
+    var tnote = data.market_note ? esc(data.market_note) : "The carrier market sweep timed out. Ask me to retry the comparison.";
+    h += '<div class="wm-timeout">' + tnote + '</div>';
   }
   h += '</div>';
 
@@ -340,6 +358,8 @@ window.__warpRenderCard = function(data) {
   var foot;
   if (data.loading_market && !mkt.length) {
     foot = "Warp rate ready &#183; comparing 30+ carriers&hellip;";
+  } else if (data.market_timeout && !mkt.length) {
+    foot = "Warp rate ready &#183; carrier sweep timed out &#183; ask me to retry the comparison";
   } else if (mkt.length) {
     foot = anyBookable
       ? "All-inclusive pricing &#183; ask me to book any carrier directly"

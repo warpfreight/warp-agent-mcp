@@ -2,7 +2,7 @@ import { McpServer, type ToolCallback, type RegisteredTool } from "@modelcontext
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { WarpClient, WarpApiError, USER_AGENT } from "./client.js";
+import { WarpClient, WarpApiError, USER_AGENT, type MarketOptionsResult } from "./client.js";
 import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, isCanadianPostal, CANADA_POLICY, coverageGapRefusal } from "./policy.js";
 import {
@@ -296,6 +296,26 @@ function tally(rows: Record<string, unknown>[], key: string): Record<string, num
   return out;
 }
 
+// Accessorial slug allowlists (mirror the quote tools' own schema .describe()
+// text). Validation lives at the MCP layer only — we deliberately do NOT add a
+// 400 to the live warp-site quote routes, which existing REST/SDK callers hit.
+const VALID_PICKUP_ACCESSORIALS = ["pickup-appointment", "liftgate-pickup", "residential-pickup", "limited-access-pickup", "inside-pickup", "driver-assist-pickup"];
+const VALID_DELIVERY_ACCESSORIALS = ["delivery-appointment", "liftgate-delivery", "residential-delivery", "limited-access-delivery", "inside-delivery", "driver-assist-delivery"];
+
+// Reject unknown/misspelled accessorial slugs BEFORE the client call so a value
+// like "liftgate" (instead of "liftgate-delivery") never reaches warp-site.
+// Returns an error message naming the bad slug(s) + the valid options for that
+// side, or null when everything is a known-valid slug (passed through unchanged).
+function checkAccessorials(pickup?: string[], delivery?: string[]): string | null {
+  const badPickup = (pickup ?? []).filter((s) => !VALID_PICKUP_ACCESSORIALS.includes(s));
+  const badDelivery = (delivery ?? []).filter((s) => !VALID_DELIVERY_ACCESSORIALS.includes(s));
+  if (badPickup.length === 0 && badDelivery.length === 0) return null;
+  const parts: string[] = [];
+  if (badPickup.length) parts.push(`Unknown pickup accessorial${badPickup.length > 1 ? "s" : ""}: ${badPickup.join(", ")}. Valid pickup accessorials: ${VALID_PICKUP_ACCESSORIALS.join(", ")}.`);
+  if (badDelivery.length) parts.push(`Unknown delivery accessorial${badDelivery.length > 1 ? "s" : ""}: ${badDelivery.join(", ")}. Valid delivery accessorials: ${VALID_DELIVERY_ACCESSORIALS.join(", ")}.`);
+  return parts.join(" ");
+}
+
 export function registerTools(server: McpServer, client: WarpClient, getApiKey: () => string | undefined) {
   // Called fresh on every tool invocation — picks up CLI login/signup without MCP restart
   const WARP_API_KEY = getApiKey;
@@ -343,10 +363,10 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   const vanQuoteTool = tool(
     "van_quote",
-    "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)",
+    "Quote a cargo van shipment (1-3 pallets, firm price)",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pallets: z.number().int().min(1).max(3).describe("Number of pallets (1-3)"),
       weight_lbs_per_pallet: z.number().min(50).max(3500).describe("Weight per pallet in lbs"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
@@ -366,6 +386,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
         const commodityIssue = checkCommodity(params.commodity);
         if (commodityIssue) return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        const accIssue = checkAccessorials(params.pickup_services, params.delivery_services);
+        if (accIssue) return { content: [{ type: "text", text: accIssue }], isError: true };
         const data = await client.vanQuote(params) as Record<string, unknown>;
         // Cache all option amounts for booking
         const _vwid = data?.warp_quote_id as string | undefined; const _vwamt = data?.warp_price as number | undefined;
@@ -402,10 +424,10 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   const boxTruckQuoteTool = tool(
     "box_truck_quote",
-    "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)",
+    "Quote a 26' box truck shipment (1-12 pallets, firm price)",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pallets: z.number().int().min(1).max(12).describe("Number of pallets (1-12)"),
       weight_lbs_per_pallet: z.number().min(50).max(10000).describe("Weight per pallet in lbs"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
@@ -425,6 +447,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
         const commodityIssue = checkCommodity(params.commodity);
         if (commodityIssue) return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        const accIssue = checkAccessorials(params.pickup_services, params.delivery_services);
+        if (accIssue) return { content: [{ type: "text", text: accIssue }], isError: true };
         const data = await client.boxTruckQuote(params) as Record<string, unknown>;
         const _bwid = data?.warp_quote_id as string | undefined; const _bwamt = data?.warp_price as number | undefined;
         if (_bwid && _bwamt) quoteAmountCache.set(_bwid, _bwamt);
@@ -462,8 +486,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "ftl_quote",
     "Quote a full truckload (53' dry van). Only origin, destination, and date required.",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       pallets: z.number().int().min(1).max(26).optional().describe("Pallets (optional, display only)"),
       weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet (optional)"),
@@ -516,8 +540,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "ltl_quote",
     "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for an exact firm quote; if you don't have dims, quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) for an instant price. Don't block on asking for pallet dimensions; quote first, then pass real dims for an exact rate. When a palletized load could also move by box truck or van, quote LTL alongside those and show the cheapest valid mode. Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide.",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       pallets: z.number().int().min(1).max(26).optional().describe("Number of pallets"),
       weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet in lbs"),
@@ -540,6 +564,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
         const commodityIssue = checkCommodity(params.commodity);
         if (commodityIssue) return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        const accIssue = checkAccessorials(params.pickup_services, params.delivery_services);
+        if (accIssue) return { content: [{ type: "text", text: accIssue }], isError: true };
         const data = await client.ltlQuote(params, params.origin_zip, params.destination_zip) as Record<string, unknown>;
         // Cache Warp quote amount
         const qid = data?.warp_quote_id as string | undefined;
@@ -594,8 +620,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "ltl_market_options",
     "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list.",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       pallets: z.number().int().min(1).max(26).optional().describe("Number of pallets"),
       weight_lbs_per_pallet: z.number().min(50).max(5000).optional().describe("Weight per pallet in lbs"),
@@ -618,11 +644,14 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         }
         const commodityIssue = checkCommodity(params.commodity);
         if (commodityIssue) return { content: [{ type: "text", text: commodityIssue }], isError: true };
+        const accIssue = checkAccessorials(params.pickup_services, params.delivery_services);
+        if (accIssue) return { content: [{ type: "text", text: accIssue }], isError: true };
         // Fire Warp quote + carrier spread in parallel. Total latency ≈ slow (~15s).
-        const [warpRaw, marketOptions] = await Promise.all([
+        const [warpRaw, marketResult] = await Promise.all([
           client.ltlQuote(params, params.origin_zip, params.destination_zip).catch(() => ({})) as Promise<Record<string, unknown>>,
-          client.ltlMarketOptions(params).catch(() => [] as unknown[]),
+          client.ltlMarketOptions(params).catch((): MarketOptionsResult => ({ options: [] })),
         ]);
+        const marketOptions = Array.isArray(marketResult.options) ? marketResult.options : [];
         // Cache Warp quote amount so book can log revenue
         const qid = warpRaw?.warp_quote_id as string | undefined;
         const qamt = warpRaw?.warp_price as number | undefined;
@@ -653,11 +682,20 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           if (rid && rprice) quoteAmountCache.set(rid, rprice);
         }
 
+        // If the carrier sweep timed out, the route sends retryable:true (with a
+        // human note and, at best, a last-good cached spread). When it comes back
+        // with zero rows AND retryable, flag the card so it shows a "market sweep
+        // timed out — retry" state instead of silently collapsing to a book
+        // prompt. The fast Warp headline rate still shows either way.
+        const marketTimedOut = marketResult.retryable === true && marketOptions.length === 0;
         // Combine for the card: Warp featured + filled-in spread, loading flag cleared.
         const combined: Record<string, unknown> = {
           ...warpRaw,
           market_options: marketOptions,
           loading_market: false,
+          market_timeout: marketTimedOut,
+          market_cached: marketResult.cached === true,
+          ...(marketResult.note ? { market_note: marketResult.note } : {}),
         };
         trackEvent({
           product: 'warp-agent',
@@ -767,8 +805,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     "compare_modes",
     "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Prices ALL FOUR freight modes (LTL / full truckload / cargo van / 26' box truck) in ONE keyless call to Warp's all-modes engine and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — one round trip, and modes Warp can't serve are returned as explicitly unavailable WITH the reason rather than being dropped, so there is never a silently shortened list to guess from. Dims are optional (a standard 48x40x48 pallet is assumed). Set benchmark_market:true to also rank Warp's rate against the live 30+ carrier market for the lane (adds ~15-25s) — that makes the answer decision-complete: the right mode AND whether the price is actually good. Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms.",
     {
-      origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-      destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+      origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+      destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       pallets: z.number().int().min(1).max(26).describe("Number of pallets (1-26)"),
       weight_lbs_per_pallet: z.number().min(50).max(10000).describe("Weight per pallet in lbs"),
@@ -797,6 +835,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         if (commodityIssue) {
           return { content: [{ type: "text", text: commodityIssue }], isError: true };
         }
+        const accIssue = checkAccessorials(params.pickup_services, params.delivery_services);
+        if (accIssue) return { content: [{ type: "text", text: accIssue }], isError: true };
 
         const priority = params.priority ?? "cheapest";
         const pallets = params.pallets;
@@ -810,12 +850,13 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         //    re-deriving any of that client-side. Optional lane benchmark runs
         //    CONCURRENTLY, so total latency is max(quote, spread), never the sum.
         const wantBenchmark = params.benchmark_market === true;
-        const [allModes, marketRows] = await Promise.all([
+        const [allModes, marketResult] = await Promise.all([
           client.allModesQuote(params as unknown as Record<string, unknown>),
           wantBenchmark
-            ? client.ltlMarketOptions(params as unknown as Record<string, unknown>).catch(() => [] as unknown[])
-            : Promise.resolve([] as unknown[]),
+            ? client.ltlMarketOptions(params as unknown as Record<string, unknown>).catch((): MarketOptionsResult => ({ options: [] }))
+            : Promise.resolve({ options: [] } as MarketOptionsResult),
         ]);
+        const marketRows = Array.isArray(marketResult.options) ? marketResult.options : [];
 
         // The route names modes cargo_van / box_truck; our labels and limits are
         // keyed by the MCP's QuoteMode vocabulary.
@@ -1073,8 +1114,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       lanes: z.array(
         z.object({
           mode: z.enum(["ltl", "ftl", "van", "box-truck"]).optional().describe("Mode for this lane. Defaults to 'ltl'."),
-          origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
-          destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US ZIP code"),
+          origin_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
+          destination_zip: z.string().regex(/^\d{5}$/, "Must be a 5-digit US ZIP code").describe("5-digit US ZIP code"),
           pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Pickup date YYYY-MM-DD (must not be in the past)"),
           pallets: z.number().int().min(1).max(26).optional(),
           weight_lbs_per_pallet: z.number().min(50).max(5000).optional(),
@@ -1847,7 +1888,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   const listBookingsTool = tool(
     "list_bookings",
-    "List recent bookings for this API key, newest first. Auth required. Renders an interactive shipments card (click a shipment to expand pickup/delivery, freight, and a tracking link).",
+    "List recent bookings for this API key, newest first. Returns shipments across all channels and all time, including cancelled — a broader population than shipper_profile's counts (agent-API bookings over the last 180 days, excluding cancelled), so the totals can differ. Auth required. Renders an interactive shipments card (click a shipment to expand pickup/delivery, freight, and a tracking link).",
     {
       limit: z.number().int().min(1).max(100).optional().describe("Max bookings to return (default 25, max 100)"),
     },
@@ -2219,7 +2260,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   tool(
     "shipper_profile",
-    "Read how this account actually ships — top lanes with ship counts, typical pallet count, usual pickup weekday, recent booked spend (derived server-side from the account's own quotes and bookings) plus explicit owner-set preferences: default accessorials, preferred mode, standard pallet dims, max transit days. READ THIS BEFORE asking the user questions it already answers: pre-fill their usual lane, apply their standard dims, include the liftgate they always need. Pass set_preferences to update the explicit half (merge-partial; allowlisted keys only; null clears a key). This profile is CONTEXT, NEVER PERMISSION — it never authorizes anything; spending limits live in spend policy and are read-only. Auth required.",
+    "Read how this account actually ships — top lanes with ship counts, typical pallet count, usual pickup weekday, recent booked spend (derived server-side from the account's own quotes and bookings) plus explicit owner-set preferences: default accessorials, preferred mode, standard pallet dims, max transit days. The ship/booking counts here count bookings via the agent API over the last 180 days, excluding cancelled — a narrower population than list_bookings (all channels, all time, including cancelled), so the totals can differ. READ THIS BEFORE asking the user questions it already answers: pre-fill their usual lane, apply their standard dims, include the liftgate they always need. Pass set_preferences to update the explicit half (merge-partial; allowlisted keys only; null clears a key). This profile is CONTEXT, NEVER PERMISSION — it never authorizes anything; spending limits live in spend policy and are read-only. Auth required.",
     {
       set_preferences: z.object({
         default_accessorials: z.object({
@@ -2253,7 +2294,16 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           success: true,
           duration_ms: Date.now() - start,
         });
-        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        // Label the count scope so a "2 bookings" here never looks like it
+        // contradicts a "7 shipments" from list_bookings — they're two different
+        // populations, not a reconciliation error.
+        const out = (!set_preferences && data && typeof data === "object" && !Array.isArray(data))
+          ? {
+              ...(data as Record<string, unknown>),
+              counts_scope: "Ship counts and recent spend here count bookings via the agent API over the last 180 days, excluding cancelled. list_bookings returns shipments across all channels and all time, including cancelled, so its total can be higher.",
+            }
+          : data;
+        return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
       } catch (err) {
         trackEvent({
           product: 'warp-agent',
@@ -2489,6 +2539,90 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
               latest: new Date(Math.max(...times)).toISOString().slice(0, 10),
               source_field: dateKey,
             };
+          }
+        }
+
+        // FALLBACK: gw's /freights/shipments rows frequently omit
+        // mode/lane/status/spend, which leaves those breakdowns "unavailable"
+        // above. warp-site's normalized bookings route carries mode, origin_zip,
+        // destination_zip, price_usd and status per row, so when a breakdown
+        // could not be derived from the gw rows, derive it from there instead.
+        // Scoped to THIS tool only — list_bookings' data source is untouched.
+        const missing = {
+          spend: summary.spend === undefined,
+          by_mode: summary.by_mode === undefined,
+          by_status: summary.by_status === undefined,
+          top_lanes: summary.top_lanes === undefined,
+        };
+        if (apiKey && (missing.spend || missing.by_mode || missing.by_status || missing.top_lanes)) {
+          try {
+            const nlim = params.limit ?? 100;
+            const res = await fetch(`https://www.wearewarp.com/api/v1/bookings?limit=${nlim}`, {
+              headers: { "Authorization": `Bearer ${apiKey}`, "user-agent": USER_AGENT },
+              signal: AbortSignal.timeout(15000),
+            });
+            const nrows = res.ok ? pickRows(await res.json()) : [];
+            if (nrows.length > 0) {
+              const filled: string[] = [];
+              const nSpendKey = firstKeyPresent(nrows, ["price_usd", "amount_usd", "total_usd", "amount", "total", "price"]);
+              const nModeKey = firstKeyPresent(nrows, ["mode", "service_mode", "equipment", "service"]);
+              const nStatusKey = firstKeyPresent(nrows, ["status", "state", "shipment_status"]);
+              const nOriginKey = firstKeyPresent(nrows, ["origin_zip", "origin", "from_zip", "pickup_zip"]);
+              const nDestKey = firstKeyPresent(nrows, ["destination_zip", "destination", "to_zip", "dropoff_zip"]);
+
+              if (missing.spend && nSpendKey) {
+                const amounts = nrows.map((r) => anToNumber(r[nSpendKey])).filter((n): n is number => n !== null);
+                if (amounts.length > 0) {
+                  const total = amounts.reduce((a, b) => a + b, 0);
+                  summary.spend = {
+                    total: round2(total),
+                    average_per_shipment: round2(total / amounts.length),
+                    largest: round2(Math.max(...amounts)),
+                    smallest: round2(Math.min(...amounts)),
+                    counted: amounts.length,
+                    source_field: nSpendKey,
+                  };
+                  filled.push("spend");
+                }
+              }
+              if (missing.by_mode && nModeKey) {
+                const t = tally(nrows, nModeKey);
+                if (Object.keys(t).length > 0) { summary.by_mode = t; filled.push("by_mode"); }
+              }
+              if (missing.by_status && nStatusKey) {
+                const t = tally(nrows, nStatusKey);
+                if (Object.keys(t).length > 0) { summary.by_status = t; filled.push("by_status"); }
+              }
+              if (missing.top_lanes && nOriginKey && nDestKey) {
+                const lanes = new Map<string, number>();
+                for (const r of nrows) {
+                  const o = stringish(r[nOriginKey]);
+                  const d = stringish(r[nDestKey]);
+                  if (!o || !d) continue;
+                  const k = `${o} -> ${d}`;
+                  lanes.set(k, (lanes.get(k) ?? 0) + 1);
+                }
+                if (lanes.size > 0) {
+                  summary.top_lanes = [...lanes.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5)
+                    .map(([lane, shipments]) => ({ lane, shipments }));
+                  summary.distinct_lanes = lanes.size;
+                  filled.push("top_lanes");
+                }
+              }
+              if (filled.length > 0) {
+                // Drop the reasons we've now satisfied from the normalized route.
+                for (let i = unavailable.length - 1; i >= 0; i--) {
+                  if (filled.some((f) => unavailable[i].startsWith(`${f} `))) unavailable.splice(i, 1);
+                }
+                summary.breakdown_source_note = `Derived ${filled.join(", ")} from warp-site's normalized bookings route because the gw shipment rows lacked those keys.`;
+              }
+            }
+          } catch {
+            // Normalized route unreachable — leave the breakdowns unavailable
+            // with their original reasons. A defensible "I couldn't tell", not a
+            // false zero.
           }
         }
 

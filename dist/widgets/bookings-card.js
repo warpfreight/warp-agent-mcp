@@ -297,8 +297,12 @@ window.__warpRenderBookings = function(data) {
   data.shipments.forEach(function(s, idx){
     var lane = cityState(s.origin_city, s.origin_state) + ' &#8594; ' + cityState(s.dest_city, s.dest_state);
     if (lane === ' &#8594; ') lane = esc(s.origin_zip) + ' &#8594; ' + esc(s.dest_zip);
+    // A freshly-booked shipment can come back with a blank status. Default it to
+    // a neutral "Pending" label (neutral base pill styling) so it always shows a
+    // pill instead of nothing.
+    var statusLabel = s.status ? s.status : "Pending";
     var sc = statusClass(s.status);
-    var statusPill = s.status ? '<span class="wb-pill ' + sc + '">' + esc(s.status) + '</span>' : '';
+    var statusPill = '<span class="wb-pill ' + sc + '">' + esc(statusLabel) + '</span>';
     var meta = esc(s.mode) + SEP + freightLine(s.freight) + SEP + 'booked ' + fmtDate(s.created);
 
     var delay = Math.min(idx, 12) * 35;

@@ -31,6 +31,8 @@ export interface QuoteWidgetData {
     warp_count: number;
     marketplace_count: number;
     loading_market?: boolean;
+    market_timeout?: boolean;
+    market_note?: string;
 }
 export declare const QUOTE_CARD_RESOURCE_URI = "ui://warp/quote-card";
 export declare const QUOTE_CARD_MCP_RESOURCE_URI = "ui://warp/quote-card.mcp";

@@ -295,9 +295,18 @@ export class WarpClient {
             signal: AbortSignal.timeout(30000),
         });
         if (!res.ok)
-            return [];
+            return { options: [] };
         const j = await res.json();
-        return Array.isArray(j.market_options) ? j.market_options : [];
+        // The route returns { market_options, retryable, cached, note } — on a carrier
+        // sweep timeout it sends retryable:true, a human `note`, and (at best) a
+        // last-good `cached` spread. Preserve those so the tool/card can show a
+        // "timed out — retry" state instead of collapsing to zero rows silently.
+        return {
+            options: Array.isArray(j.market_options) ? j.market_options : [],
+            retryable: j.retryable === true,
+            cached: j.cached === true,
+            note: typeof j.note === "string" ? j.note : undefined,
+        };
     }
     /**
      * All four modes in ONE upstream call via the public keyless all-modes

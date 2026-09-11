@@ -16,6 +16,17 @@ const CLIENT_VERSION = "0.19.1";
 // Exported so the tool-layer fetches (login/apikey/quote-log/version/me) send it too.
 export const USER_AGENT = `warp-agent-mcp/${CLIENT_VERSION}`;
 
+/** Multi-carrier LTL spread plus the timeout signals the market-options route
+ *  returns when its carrier poll times out (retryable + a human note + a
+ *  last-good cached spread). The caller surfaces these instead of dropping the
+ *  comparison to zero rows. */
+export interface MarketOptionsResult {
+  options: unknown[];
+  retryable?: boolean;
+  cached?: boolean;
+  note?: string;
+}
+
 /** Freight details captured at quote time, replayed at book time so the
  *  atomic /freight/book call matches what was quoted. */
 interface CachedQuote {
@@ -294,7 +305,7 @@ export class WarpClient {
 
   // Public wrapper used by the warp_ltl_market_options tool. Takes raw tool
   // params, normalises to the canonical quote body, and fetches the spread.
-  async ltlMarketOptions(params: Record<string, unknown>): Promise<unknown[]> {
+  async ltlMarketOptions(params: Record<string, unknown>): Promise<MarketOptionsResult> {
     const key = this.getApiKey();
     return this._ltlMarketOptions(this.buildQuoteBody(params), key);
   }
@@ -304,7 +315,7 @@ export class WarpClient {
   private async _ltlMarketOptions(
     body: Record<string, unknown>,
     key: string | undefined,
-  ): Promise<unknown[]> {
+  ): Promise<MarketOptionsResult> {
     const url = `${this.selfServeOrigin}/api/v1/ltl/market-options`;
     const headers: Record<string, string> = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
     if (key) headers["Authorization"] = `Bearer ${key}`;
@@ -315,9 +326,18 @@ export class WarpClient {
       // is 45s). Still a ceiling — if it ever exceeds this we degrade gracefully.
       signal: AbortSignal.timeout(30000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { options: [] };
     const j = await res.json() as Record<string, unknown>;
-    return Array.isArray(j.market_options) ? j.market_options : [];
+    // The route returns { market_options, retryable, cached, note } — on a carrier
+    // sweep timeout it sends retryable:true, a human `note`, and (at best) a
+    // last-good `cached` spread. Preserve those so the tool/card can show a
+    // "timed out — retry" state instead of collapsing to zero rows silently.
+    return {
+      options: Array.isArray(j.market_options) ? j.market_options : [],
+      retryable: j.retryable === true,
+      cached: j.cached === true,
+      note: typeof j.note === "string" ? j.note : undefined,
+    };
   }
 
   /**
