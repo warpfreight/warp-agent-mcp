@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { WarpApiError, USER_AGENT } from "./client.js";
 import { trackEvent, getCustomerEmail } from "./analytics.js";
-import { checkCommodity, isCanadianPostal, coverageGapRefusal } from "./policy.js";
+import { checkCommodity, checkProhibited, isCanadianPostal, coverageGapRefusal } from "./policy.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, renderQuoteCard, toWidgetData, } from "./widgets/quote-card.js";
 import { BOOKINGS_CARD_RESOURCE_URI, BOOKINGS_CARD_MCP_RESOURCE_URI, renderBookingsCard, toBookingsWidgetData, trackingUrl, } from "./widgets/bookings-card.js";
 import { BATCH_QUOTE_CARD_RESOURCE_URI, BATCH_QUOTE_CARD_MCP_RESOURCE_URI, renderBatchQuoteCard, toBatchQuoteWidgetData, } from "./widgets/batch-quote-card.js";
@@ -268,6 +268,91 @@ function tally(rows, key) {
     }
     return out;
 }
+/* Summarise ONE booking population. The headline count (rows.length) AND every
+   breakdown are derived from these exact rows, so the total can never disagree
+   with the splits beneath it. Fields we cannot read are reported as
+   `unavailable` with a reason, never as a false zero. This replaced the old
+   two-source design where the count came from gw /freights/shipments while the
+   breakdowns came from warp-site /bookings — a mismatch that reported e.g.
+   "7 shipments" over breakdowns covering only 2. */
+function summarizeBookingRows(rows) {
+    const spendKey = firstKeyPresent(rows, ["price_usd", "amount_usd", "total_usd", "amount", "total", "price"]);
+    const modeKey = firstKeyPresent(rows, ["mode", "service_mode", "equipment", "service"]);
+    const statusKey = firstKeyPresent(rows, ["status", "state", "shipment_status"]);
+    const originKey = firstKeyPresent(rows, ["origin_zip", "origin", "from_zip", "pickup_zip"]);
+    const destKey = firstKeyPresent(rows, ["destination_zip", "destination", "to_zip", "dropoff_zip"]);
+    const dateKey = firstKeyPresent(rows, ["created_at", "booked_at", "pickup_date", "date"]);
+    const unavailable = [];
+    const summary = { shipments: rows.length };
+    if (spendKey) {
+        const amounts = rows.map((r) => anToNumber(r[spendKey])).filter((n) => n !== null);
+        if (amounts.length > 0) {
+            const total = amounts.reduce((a, b) => a + b, 0);
+            summary.spend = {
+                total: round2(total),
+                average_per_shipment: round2(total / amounts.length),
+                largest: round2(Math.max(...amounts)),
+                smallest: round2(Math.min(...amounts)),
+                counted: amounts.length,
+                ...(amounts.length < rows.length
+                    ? { note: `${rows.length - amounts.length} booking(s) had no readable amount and are excluded from spend.` }
+                    : {}),
+                source_field: spendKey,
+            };
+        }
+        else {
+            unavailable.push(`spend — field "${spendKey}" is present but held no numeric values`);
+        }
+    }
+    else {
+        unavailable.push("spend — no amount field on these bookings");
+    }
+    if (modeKey)
+        summary.by_mode = tally(rows, modeKey);
+    else
+        unavailable.push("by_mode — no mode field on these bookings");
+    if (statusKey)
+        summary.by_status = tally(rows, statusKey);
+    else
+        unavailable.push("by_status — no status field on these bookings");
+    if (originKey && destKey) {
+        const lanes = new Map();
+        for (const r of rows) {
+            const o = stringish(r[originKey]);
+            const d = stringish(r[destKey]);
+            if (!o || !d)
+                continue;
+            const k = `${o} -> ${d}`;
+            lanes.set(k, (lanes.get(k) ?? 0) + 1);
+        }
+        if (lanes.size > 0) {
+            summary.top_lanes = [...lanes.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(([lane, shipments]) => ({ lane, shipments }));
+            summary.distinct_lanes = lanes.size;
+        }
+        else {
+            unavailable.push("top_lanes — origin/destination fields were present but empty");
+        }
+    }
+    else {
+        unavailable.push("top_lanes — no origin/destination fields on these bookings");
+    }
+    if (dateKey) {
+        const times = rows
+            .map((r) => Date.parse(String(r[dateKey] ?? "")))
+            .filter((t) => Number.isFinite(t));
+        if (times.length > 0) {
+            summary.window = {
+                earliest: new Date(Math.min(...times)).toISOString().slice(0, 10),
+                latest: new Date(Math.max(...times)).toISOString().slice(0, 10),
+                source_field: dateKey,
+            };
+        }
+    }
+    return { summary, unavailable };
+}
 // Accessorial slug allowlists (mirror the quote tools' own schema .describe()
 // text). Validation lives at the MCP layer only — we deliberately do NOT add a
 // 400 to the live warp-site quote routes, which existing REST/SDK callers hit.
@@ -320,6 +405,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue)
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue)
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -381,6 +469,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue)
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue)
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -437,6 +528,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadaLane) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue)
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue)
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -497,6 +591,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue)
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue)
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -573,6 +670,9 @@ export function registerTools(server, client, getApiKey) {
             if (isCanadianPostal(params.origin_zip) || isCanadianPostal(params.destination_zip)) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
             }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue)
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue)
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -748,6 +848,10 @@ export function registerTools(server, client, getApiKey) {
             }
             // Same ambient/shelf-stable policy the booking path enforces — refuse
             // reefer freight before spending four upstream quote calls on it.
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue) {
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
+            }
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue) {
                 return { content: [{ type: "text", text: commodityIssue }], isError: true };
@@ -1038,15 +1142,28 @@ export function registerTools(server, client, getApiKey) {
         try {
             const rawLanes = params.lanes;
             // Refuse Canadian zips up front (no need to burn quote calls on them).
-            for (const lane of rawLanes) {
+            for (let i = 0; i < rawLanes.length; i++) {
+                const lane = rawLanes[i];
                 const o = String(lane.origin_zip ?? "");
                 const d = String(lane.destination_zip ?? "");
+                // Name the offending lane by 1-based index + its ZIPs so the caller can
+                // find it in a many-row spreadsheet.
+                const laneLabel = `lane ${i + 1} (${o || "?"} -> ${d || "?"})`;
                 if (isCanadianPostal(o) || isCanadianPostal(d)) {
                     return { content: [{ type: "text", text: "Warp only services US domestic shipments. Remove non-US lanes and try again." }], isError: true };
                 }
+                const prohibitedIssue = checkProhibited(lane.commodity);
+                if (prohibitedIssue)
+                    return { content: [{ type: "text", text: `${laneLabel}, commodity "${String(lane.commodity)}": ${prohibitedIssue}` }], isError: true };
                 const commodityIssue = checkCommodity(lane.commodity);
                 if (commodityIssue)
-                    return { content: [{ type: "text", text: `Lane with commodity "${String(lane.commodity)}": ${commodityIssue}` }], isError: true };
+                    return { content: [{ type: "text", text: `${laneLabel}, commodity "${String(lane.commodity)}": ${commodityIssue}` }], isError: true };
+                // FIX: batch_quote previously skipped accessorial validation, silently
+                // accepting a typo'd slug that single-mode quotes reject. Validate the
+                // same allowlist here, per lane, BEFORE the client call.
+                const accIssue = checkAccessorials(lane.pickup_services, lane.delivery_services);
+                if (accIssue)
+                    return { content: [{ type: "text", text: `${laneLabel}: ${accIssue}` }], isError: true };
             }
             const results = await client.batchQuote(rawLanes);
             // Cache each priced lane's quote_id → amount so book can log revenue.
@@ -1429,6 +1546,10 @@ export function registerTools(server, client, getApiKey) {
             const zips = [params.pickup_zip, ...params.stop_zips, params.delivery_zip];
             if (zips.some((zip) => isCanadianPostal(zip))) {
                 return { content: [{ type: "text", text: "Warp only services US domestic shipments. International shipping is not available." }], isError: true };
+            }
+            const prohibitedIssue = checkProhibited(params.commodity);
+            if (prohibitedIssue) {
+                return { content: [{ type: "text", text: prohibitedIssue }], isError: true };
             }
             const commodityIssue = checkCommodity(params.commodity);
             if (commodityIssue) {
@@ -2190,7 +2311,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── analytics ─────────────────────────────────────────
-    tool("analytics", "Summarise your own shipping history: how many shipments, what you spent, and the split by mode, status and lane over a window. Aggregates the same bookings `list_bookings` returns, so an agent gets the answer in one call instead of pulling the list and adding it up. Auth required.", {
+    tool("analytics", "Summarise your own shipping history: how many bookings, what you spent, and the split by mode, status and lane over a window. Both the headline count and every breakdown are computed from ONE population — your bookings via the agent API (warp-site /bookings) — so the total always matches the splits. Auth required.", {
         limit: z.number().int().min(1).max(500).optional().describe("How many of your most recent bookings to summarise (default 100, max 500)"),
         group_by: z.enum(["mode", "status", "lane"]).optional().describe("Which breakdown to lead with. All three are returned regardless; this only orders the response."),
     }, { title: "Summarise Shipping History", readOnlyHint: true }, async (params) => {
@@ -2199,185 +2320,59 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: "No API key found. Connect your Warp account to this connector (or run warp-agent login for the local install)." }], isError: true };
         }
         try {
-            const raw = await client.listBookings(params.limit ?? 100);
-            const rows = pickRows(raw);
-            // Nothing to summarise is a real answer, not an error.
+            const nlim = params.limit ?? 100;
+            // ONE coherent population. The count AND every breakdown are computed
+            // from the same rows, so the headline number can never disagree with
+            // the splits (the old design counted from gw /freights/shipments but
+            // pulled breakdowns from warp-site /bookings — a smaller population —
+            // and reported "7 shipments" over breakdowns covering only 2).
+            //
+            // Primary source: warp-site's normalized /bookings route, whose rows
+            // carry mode / origin_zip / destination_zip / price_usd / status and
+            // match shipper_profile's scope. If it is empty or unreachable, we fall
+            // back to the gw shipments list — still a SINGLE source for both the
+            // count and the breakdowns, never a cross-source split.
+            let rows = [];
+            let scope = `bookings via the agent API (warp-site /bookings), most recent ${nlim}`;
+            let sourceNote;
+            try {
+                const res = await fetch(`https://www.wearewarp.com/api/v1/bookings?limit=${nlim}`, {
+                    headers: { "Authorization": `Bearer ${apiKey}`, "user-agent": USER_AGENT },
+                    signal: AbortSignal.timeout(15000),
+                });
+                if (res.ok)
+                    rows = pickRows(await res.json());
+            }
+            catch {
+                // warp-site unreachable — fall through to the gw fallback below.
+            }
             if (rows.length === 0) {
-                return { content: [{ type: "text", text: JSON.stringify({ shipments: 0, note: "No bookings found on this account for the requested window." }, null, 2) }] };
-            }
-            // Every metric is derived from keys PROVED present on the rows rather
-            // than assumed. A metric we cannot compute is reported as unavailable
-            // with the reason — never as a zero, which would read as "you spent
-            // nothing" instead of "I could not tell".
-            const spendKey = firstKeyPresent(rows, ["amount_usd", "total_usd", "price_usd", "amount", "total", "price"]);
-            const modeKey = firstKeyPresent(rows, ["mode", "service_mode", "equipment", "service"]);
-            const statusKey = firstKeyPresent(rows, ["status", "state", "shipment_status"]);
-            const originKey = firstKeyPresent(rows, ["origin_zip", "origin", "from_zip", "pickup_zip"]);
-            const destKey = firstKeyPresent(rows, ["destination_zip", "destination", "to_zip", "dropoff_zip"]);
-            const dateKey = firstKeyPresent(rows, ["created_at", "booked_at", "pickup_date", "date"]);
-            const unavailable = [];
-            const summary = { shipments: rows.length };
-            if (spendKey) {
-                const amounts = rows.map((r) => anToNumber(r[spendKey])).filter((n) => n !== null);
-                if (amounts.length > 0) {
-                    const total = amounts.reduce((a, b) => a + b, 0);
-                    summary.spend = {
-                        total: round2(total),
-                        average_per_shipment: round2(total / amounts.length),
-                        largest: round2(Math.max(...amounts)),
-                        smallest: round2(Math.min(...amounts)),
-                        counted: amounts.length,
-                        ...(amounts.length < rows.length
-                            ? { note: `${rows.length - amounts.length} booking(s) had no readable amount and are excluded from spend.` }
-                            : {}),
-                        source_field: spendKey,
-                    };
-                }
-                else {
-                    unavailable.push(`spend — field "${spendKey}" is present but held no numeric values`);
-                }
-            }
-            else {
-                unavailable.push("spend — no amount field on these bookings");
-            }
-            if (modeKey)
-                summary.by_mode = tally(rows, modeKey);
-            else
-                unavailable.push("by_mode — no mode field on these bookings");
-            if (statusKey)
-                summary.by_status = tally(rows, statusKey);
-            else
-                unavailable.push("by_status — no status field on these bookings");
-            if (originKey && destKey) {
-                const lanes = new Map();
-                for (const r of rows) {
-                    const o = stringish(r[originKey]);
-                    const d = stringish(r[destKey]);
-                    if (!o || !d)
-                        continue;
-                    const k = `${o} -> ${d}`;
-                    lanes.set(k, (lanes.get(k) ?? 0) + 1);
-                }
-                if (lanes.size > 0) {
-                    summary.top_lanes = [...lanes.entries()]
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 5)
-                        .map(([lane, shipments]) => ({ lane, shipments }));
-                    summary.distinct_lanes = lanes.size;
-                }
-                else {
-                    unavailable.push("top_lanes — origin/destination fields were present but empty");
-                }
-            }
-            else {
-                unavailable.push("top_lanes — no origin/destination fields on these bookings");
-            }
-            if (dateKey) {
-                const times = rows
-                    .map((r) => Date.parse(String(r[dateKey] ?? "")))
-                    .filter((t) => Number.isFinite(t));
-                if (times.length > 0) {
-                    summary.window = {
-                        earliest: new Date(Math.min(...times)).toISOString().slice(0, 10),
-                        latest: new Date(Math.max(...times)).toISOString().slice(0, 10),
-                        source_field: dateKey,
-                    };
-                }
-            }
-            // FALLBACK: gw's /freights/shipments rows frequently omit
-            // mode/lane/status/spend, which leaves those breakdowns "unavailable"
-            // above. warp-site's normalized bookings route carries mode, origin_zip,
-            // destination_zip, price_usd and status per row, so when a breakdown
-            // could not be derived from the gw rows, derive it from there instead.
-            // Scoped to THIS tool only — list_bookings' data source is untouched.
-            const missing = {
-                spend: summary.spend === undefined,
-                by_mode: summary.by_mode === undefined,
-                by_status: summary.by_status === undefined,
-                top_lanes: summary.top_lanes === undefined,
-            };
-            if (apiKey && (missing.spend || missing.by_mode || missing.by_status || missing.top_lanes)) {
+                // Graceful fallback: summarise the gw shipments list instead. Both the
+                // count and the breakdowns come from THIS list, so the answer stays
+                // internally consistent; some breakdowns may be unavailable if gw rows
+                // omit those fields, which we report honestly rather than zeroing.
                 try {
-                    const nlim = params.limit ?? 100;
-                    const res = await fetch(`https://www.wearewarp.com/api/v1/bookings?limit=${nlim}`, {
-                        headers: { "Authorization": `Bearer ${apiKey}`, "user-agent": USER_AGENT },
-                        signal: AbortSignal.timeout(15000),
-                    });
-                    const nrows = res.ok ? pickRows(await res.json()) : [];
-                    if (nrows.length > 0) {
-                        const filled = [];
-                        const nSpendKey = firstKeyPresent(nrows, ["price_usd", "amount_usd", "total_usd", "amount", "total", "price"]);
-                        const nModeKey = firstKeyPresent(nrows, ["mode", "service_mode", "equipment", "service"]);
-                        const nStatusKey = firstKeyPresent(nrows, ["status", "state", "shipment_status"]);
-                        const nOriginKey = firstKeyPresent(nrows, ["origin_zip", "origin", "from_zip", "pickup_zip"]);
-                        const nDestKey = firstKeyPresent(nrows, ["destination_zip", "destination", "to_zip", "dropoff_zip"]);
-                        if (missing.spend && nSpendKey) {
-                            const amounts = nrows.map((r) => anToNumber(r[nSpendKey])).filter((n) => n !== null);
-                            if (amounts.length > 0) {
-                                const total = amounts.reduce((a, b) => a + b, 0);
-                                summary.spend = {
-                                    total: round2(total),
-                                    average_per_shipment: round2(total / amounts.length),
-                                    largest: round2(Math.max(...amounts)),
-                                    smallest: round2(Math.min(...amounts)),
-                                    counted: amounts.length,
-                                    source_field: nSpendKey,
-                                };
-                                filled.push("spend");
-                            }
-                        }
-                        if (missing.by_mode && nModeKey) {
-                            const t = tally(nrows, nModeKey);
-                            if (Object.keys(t).length > 0) {
-                                summary.by_mode = t;
-                                filled.push("by_mode");
-                            }
-                        }
-                        if (missing.by_status && nStatusKey) {
-                            const t = tally(nrows, nStatusKey);
-                            if (Object.keys(t).length > 0) {
-                                summary.by_status = t;
-                                filled.push("by_status");
-                            }
-                        }
-                        if (missing.top_lanes && nOriginKey && nDestKey) {
-                            const lanes = new Map();
-                            for (const r of nrows) {
-                                const o = stringish(r[nOriginKey]);
-                                const d = stringish(r[nDestKey]);
-                                if (!o || !d)
-                                    continue;
-                                const k = `${o} -> ${d}`;
-                                lanes.set(k, (lanes.get(k) ?? 0) + 1);
-                            }
-                            if (lanes.size > 0) {
-                                summary.top_lanes = [...lanes.entries()]
-                                    .sort((a, b) => b[1] - a[1])
-                                    .slice(0, 5)
-                                    .map(([lane, shipments]) => ({ lane, shipments }));
-                                summary.distinct_lanes = lanes.size;
-                                filled.push("top_lanes");
-                            }
-                        }
-                        if (filled.length > 0) {
-                            // Drop the reasons we've now satisfied from the normalized route.
-                            for (let i = unavailable.length - 1; i >= 0; i--) {
-                                if (filled.some((f) => unavailable[i].startsWith(`${f} `)))
-                                    unavailable.splice(i, 1);
-                            }
-                            summary.breakdown_source_note = `Derived ${filled.join(", ")} from warp-site's normalized bookings route because the gw shipment rows lacked those keys.`;
-                        }
+                    rows = pickRows(await client.listBookings(nlim));
+                    if (rows.length > 0) {
+                        scope = `shipments via gw /freights/shipments, most recent ${nlim}`;
+                        sourceNote = "warp-site /bookings was empty or unreachable; summarised the gw shipments list instead. A breakdown shows as unavailable when the gw rows omit that field.";
                     }
                 }
                 catch {
-                    // Normalized route unreachable — leave the breakdowns unavailable
-                    // with their original reasons. A defensible "I couldn't tell", not a
-                    // false zero.
+                    // Both sources unavailable — reported as zero shipments below.
                 }
             }
+            // Nothing to summarise is a real answer, not an error.
+            if (rows.length === 0) {
+                return { content: [{ type: "text", text: JSON.stringify({ shipments: 0, scope, note: "No bookings found for the requested window (warp-site /bookings and the gw shipments list both returned nothing)." }, null, 2) }] };
+            }
+            const { summary, unavailable } = summarizeBookingRows(rows);
+            summary.scope = scope;
+            if (sourceNote)
+                summary.source_note = sourceNote;
             if (unavailable.length > 0)
                 summary.unavailable = unavailable;
-            summary.basis = `Aggregated from your ${rows.length} most recent booking(s) via /bookings. Figures cover those bookings only, not your whole account history.`;
+            summary.basis = `Aggregated from your ${rows.length} most recent booking(s). The count and every breakdown come from this same set — not a mix of sources — and cover those bookings only, not your whole account history.`;
             const ordered = params.group_by === "status"
                 ? { shipments: summary.shipments, by_status: summary.by_status, ...summary }
                 : params.group_by === "lane"

@@ -18,6 +18,33 @@ export function checkCommodity(commodity?: string): string | null {
   return null;
 }
 
+// Prohibited / illegal / dangerous goods. This is a LEGALITY + safety filter,
+// deliberately kept SEPARATE from EXCLUDED_COMMODITIES (which is a cold-chain
+// capability filter, not a legality one). Warp does not carry hazmat, and will
+// not quote or book illegal or dangerous freight at all. Terms are specific
+// enough to substring-match without catching innocuous words (e.g. "firearm"
+// so a bare "arms" / "arm rest" never trips it; "narcotic" / "illegal drug"
+// so a legal "drugstore" pallet does not; "dangerous good" catches "dangerous
+// goods"). Extend with care to avoid false positives.
+export const PROHIBITED_COMMODITIES = [
+  'narcotic', 'illegal drug', 'illicit drug', 'controlled substance',
+  'cocaine', 'heroin', 'methamphetamine', 'fentanyl', 'opioid',
+  'cannabis', 'marijuana', 'marihuana',
+  'weapon', 'firearm', 'ammunition', 'explosive', 'grenade', 'dynamite',
+  'hazmat', 'hazardous', 'dangerous good',
+];
+
+export function checkProhibited(commodity?: string): string | null {
+  if (!commodity) return null;
+  const lower = commodity.toLowerCase();
+  for (const term of PROHIBITED_COMMODITIES) {
+    if (lower.includes(term)) {
+      return `Warp cannot carry prohibited, hazardous, or illegal commodities. This shipment cannot be quoted or booked.`;
+    }
+  }
+  return null;
+}
+
 export function coverageGapRefusal(originZip: string, destZip: string): string {
   return `Warp does not have direct coverage on this lane (${originZip} → ${destZip}) right now. A Warp rep can work on a custom solution — contact support@wearewarp.com with your lane details.`;
 }

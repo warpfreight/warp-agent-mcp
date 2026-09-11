@@ -33,7 +33,10 @@ export function toWidgetData(mode, input, response) {
     const vehicle = typeof service.vehicle === "string" ? service.vehicle : MODE_LABELS[mode];
     const transit = typeof response.transit_days === "number" ? response.transit_days : 0;
     const delivery = typeof response.delivery_date === "string" ? response.delivery_date : input.pickup_date;
-    const expires = typeof response.expires_at === "string" ? response.expires_at : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    // Quotes carry their own expires_at; this fallback only fires when the
+    // response omits it. Warp quotes hold for 72h, so mirror that rather than the
+    // old 15-minute placeholder (which read as a false "quote expires in 15 min").
+    const expires = typeof response.expires_at === "string" ? response.expires_at : new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     const rawMkt = Array.isArray(response.market_options) ? response.market_options : [];
     const marketplaceAll = rawMkt
         .filter((o) => o && o.is_warp !== true && typeof o.price_usd === "number" && typeof o.carrier_name === "string")
