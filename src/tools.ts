@@ -351,6 +351,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       weight_lbs_per_pallet: z.number().min(50).max(3500).describe("Weight per pallet in lbs"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       commodity: z.string().optional().describe("Commodity description"),
+      length_in: z.number().positive().optional().describe("Per-pallet length in inches (defaults to 48)"),
+      width_in: z.number().positive().optional().describe("Per-pallet width in inches (defaults to 40)"),
+      height_in: z.number().positive().optional().describe("Per-pallet height in inches (defaults to 48)"),
       pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
       delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
     },
@@ -407,6 +410,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       weight_lbs_per_pallet: z.number().min(50).max(10000).describe("Weight per pallet in lbs"),
       pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => validateDate(d) === true, (d) => ({ message: validateDate(d) as string })).describe("Pickup date YYYY-MM-DD"),
       commodity: z.string().optional().describe("Commodity description"),
+      length_in: z.number().positive().optional().describe("Per-pallet length in inches (defaults to 48)"),
+      width_in: z.number().positive().optional().describe("Per-pallet width in inches (defaults to 40)"),
+      height_in: z.number().positive().optional().describe("Per-pallet height in inches (defaults to 48)"),
       pickup_services: z.array(z.string()).optional().describe("Pickup accessorials: pickup-appointment, liftgate-pickup, residential-pickup, limited-access-pickup, inside-pickup, driver-assist-pickup"),
       delivery_services: z.array(z.string()).optional().describe("Delivery accessorials: delivery-appointment, liftgate-delivery, residential-delivery, limited-access-delivery, inside-delivery, driver-assist-delivery"),
     },
@@ -748,6 +754,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   type PricedMode = {
     mode: QuoteMode; mode_label: string; price_usd: number;
+    requested_mode?: QuoteMode;
+    mode_substituted?: Record<string, unknown>;
     transit_days: number | null; delivery_date: string | null;
     quote_id: string; expires_at: string | null; booking_url: string | null;
     // Carried through from the quote route so a caller can never mistake an
@@ -854,11 +862,20 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           // We inject a standard pallet when they're omitted (otherwise the route
           // drops LTL entirely), and LTL prices off size — so downgrade and put
           // the assumed fields back on the missing list.
-          const dimsMatter = mode === "ltl";
+          const substitution = det.mode_substituted as Record<string, unknown> | undefined;
+          const servedMode = substitution
+            ? MODE_FROM_ROUTE[String(substitution.served)] ?? mode
+            : mode;
+          const substituted = servedMode !== mode;
+          const servedLabel = substituted && servedMode === "ftl"
+            ? "Dedicated truck (equipment assigned at dispatch)"
+            : MODE_LABELS[servedMode];
+          const dimsMatter = servedMode === "ltl";
           const routeTier = typeof det.quote_tier === "string" ? det.quote_tier : null;
           const routeMissing = Array.isArray(det.missing_for_ship) ? (det.missing_for_ship as string[]) : [];
           priced.push({
-            mode, mode_label: label, price_usd: price,
+            mode: servedMode, mode_label: servedLabel, price_usd: price,
+            ...(substituted ? { requested_mode: mode, mode_substituted: substitution } : {}),
             transit_days: typeof row.transit_days === "number" ? row.transit_days : null,
             delivery_date: typeof det.delivery_date === "string" ? det.delivery_date : null,
             quote_id: quoteId,
