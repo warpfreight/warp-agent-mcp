@@ -1,6 +1,6 @@
 {
   "name": "warp-agent-mcp",
-  "version": "0.19.6",
+  "version": "0.20.0",
   "description": "MCP server for the Warp freight API, covering the full booking lifecycle: mode compare (one call prices every eligible mode in parallel and returns a decision-complete recommendation with the cost-vs-transit math), quote (van/box-truck/FTL/LTL \u2014 LTL splits the fast Warp rate from the slow 30+ carrier comparison so the user sees a price in ~1-2s), batch quote (price an entire spreadsheet of lanes in one call rendered as a single card), book, batch book (confirm N quoted lanes in one call with a single progress card instead of N noisy per-row calls), multi-stop FTL (quote + book one truck across 3+ stops), track, events, invoices, documents, lane history, quote history, payment status, locations, load templates, in-chat login, status, analytics. Renders inline quote, batch-quote, batch-book, and shipments cards (click a shipment to expand a TMS-style detail view, watch the carrier spread fill in progressively) in Claude and ChatGPT. For Claude Desktop, Cursor, Claude Code, and any MCP-compatible AI agent.",
   "keywords": [
     "warp",
@@ -31,13 +31,15 @@
     "server.json"
   ],
   "scripts": {
-    "build": "node scripts/build-widget.mjs && tsc && node scripts/add-shebang.mjs",
+    "build": "node scripts/sync-version.mjs && node scripts/build-widget.mjs && tsc && node scripts/add-shebang.mjs",
     "dev": "tsc --watch",
     "postinstall": "node scripts/postinstall.mjs",
     "check:desc": "node scripts/check-description.mjs",
-    "prepublishOnly": "npm run build && node scripts/check-description.mjs",
+    "prepublishOnly": "npm run build && node scripts/check-description.mjs && node scripts/sync-manifest.mjs --check && node test/freight-review.mjs",
     "test": "node test/refund.mjs && node test/e2e.mjs",
-    "test:call-readiness": "node test/call-readiness.mjs"
+    "test:call-readiness": "node test/call-readiness.mjs",
+    "sync:manifest": "node scripts/sync-manifest.mjs",
+    "test:freight-review": "node test/freight-review.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

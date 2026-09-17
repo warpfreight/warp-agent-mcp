@@ -8,7 +8,7 @@ export declare class WarpApiError extends Error {
     body: unknown;
     constructor(status: number, body: unknown);
 }
-export declare const USER_AGENT = "warp-agent-mcp/0.19.1";
+export declare const USER_AGENT = "warp-agent-mcp/0.20.0";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
  *  last-good cached spread). The caller surfaces these instead of dropping the
