@@ -4,6 +4,8 @@
  * Auth: Bearer wak_live_* or wak_test_* key.
  */
 
+import { PACKAGE_VERSION } from "./version.js";
+
 export class WarpApiError extends Error {
   constructor(public status: number, public body: unknown) {
     super(`Warp API ${status}: ${JSON.stringify(body)}`);
@@ -11,7 +13,7 @@ export class WarpApiError extends Error {
   }
 }
 
-const CLIENT_VERSION = "0.19.1";
+const CLIENT_VERSION = PACKAGE_VERSION;
 // Distinctive UA so MCP traffic is self-identifying server-side (attribution).
 // Exported so the tool-layer fetches (login/apikey/quote-log/version/me) send it too.
 export const USER_AGENT = `warp-agent-mcp/${CLIENT_VERSION}`;

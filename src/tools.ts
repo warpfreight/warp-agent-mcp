@@ -1,3 +1,4 @@
+import { registerWorkflows } from "./workflows.js";
 import { McpServer, type ToolCallback, type RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -404,6 +405,7 @@ function checkAccessorials(pickup?: string[], delivery?: string[]): string | nul
 }
 
 export function registerTools(server: McpServer, client: WarpClient, getApiKey: () => string | undefined) {
+  registerWorkflows(server);
   // Called fresh on every tool invocation — picks up CLI login/signup without MCP restart
   const WARP_API_KEY = getApiKey;
 
@@ -1210,7 +1212,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
   // Server fans out in parallel (concurrency cap = 8). Warp single rate only.
   const batchQuoteTool = tool(
     "batch_quote",
-    "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets). Use this WHENEVER the user gives you a spreadsheet, CSV, or list of multiple lanes to quote — do NOT call warp_*_quote in a loop. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with book (\"book row 3\").",
+    "Price up to 50 lanes in one call for a specified mode per row (defaults to LTL). This returns a Warp rate per row, NOT all-mode or all-carrier comparison. For Compare All use compare_modes per shipment; for LTL carrier alternatives use ltl_market_options. Never imply this tool compared every carrier. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with book (\"book row 3\").",
     {
       lanes: z.array(
         z.object({
@@ -2550,12 +2552,12 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
           signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) {
-          return { content: [{ type: "text", text: `Could not check payment status (${res.status}). The user can try booking — they will be prompted to add a card if needed.` }] };
+          return { isError: true, content: [{ type: "text", text: JSON.stringify({ status: "unknown", code: "PAYMENT_STATUS_UNAVAILABLE", http_status: res.status, retryable: res.status === 429 || res.status >= 500, message: "Payment status could not be verified. This does not mean no card is on file. Do not attempt a booking to test billing. Retry the status check or review your account.", account_url: "https://www.wearewarp.com/agents/account" }) }] };
         }
         const data = await res.json() as { has_card?: boolean; message?: string; onboard_url?: string };
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
-        return { content: [{ type: "text", text: "Could not reach payment status endpoint. The user can try booking — they will be prompted to add a card if needed." }] };
+        return { isError: true, content: [{ type: "text", text: JSON.stringify({ status: "unknown", code: "PAYMENT_STATUS_UNAVAILABLE", retryable: true, message: "Could not reach payment status endpoint. Do not attempt a booking to test billing. Retry the status check or review your account.", account_url: "https://www.wearewarp.com/agents/account" }) }] };
       }
     },
   );

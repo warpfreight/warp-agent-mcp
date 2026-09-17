@@ -33,6 +33,8 @@ const RUN_MJS = join(__dirname, "..", "scripts", "run.mjs");
 // Multistop re-added in 0.14.0 against the canonical /api/v1/multistop/*
 // endpoints (coverage still route-dependent, surfaced as a clean message).
 const EXPECTED_TOOLS = [
+  "freight_workflow",
+  "compare_freight_costs",
   "analytics",
   "batch_book",
   "batch_quote",

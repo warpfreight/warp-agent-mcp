@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WarpClient } from "./client.js";
 import { registerTools } from "./tools.js";
+import { PACKAGE_VERSION } from "./version.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, MCP_APP_MIME_TYPE, quoteCardTemplate, quoteCardMcpTemplate, } from "./widgets/quote-card.js";
 import { BOOKINGS_CARD_RESOURCE_URI, BOOKINGS_CARD_MCP_RESOURCE_URI, bookingsCardTemplate, bookingsCardMcpTemplate, } from "./widgets/bookings-card.js";
 import { BATCH_QUOTE_CARD_RESOURCE_URI, BATCH_QUOTE_CARD_MCP_RESOURCE_URI, batchQuoteCardTemplate, batchQuoteCardMcpTemplate, } from "./widgets/batch-quote-card.js";
@@ -98,7 +99,7 @@ else {
 }
 const server = new McpServer({
     name: "warp-agent-mcp",
-    version: "0.1.0",
+    version: PACKAGE_VERSION,
 }, {
     instructions: [
         "Warp freight quoting and booking over MCP.",

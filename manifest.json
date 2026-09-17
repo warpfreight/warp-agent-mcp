@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.16.2",
+  "version": "0.20.0",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
-  "long_description": "26 tools covering the full freight booking lifecycle:\n\n- **Mode compare** \u2014 the one call for \"what's the cheapest way to ship this?\": prices every mode the load can legally ride (cargo van, box truck, LTL, FTL) in parallel and returns the winning mode, a bookable quote id, and the cost-vs-transit trade-off already calculated\n- **Quote** \u2014 instant pricing for cargo van (1-3 pallets), box truck (1-12 pallets), full truckload (53' dry van), and LTL; LTL splits the fast Warp rate from the 30+ carrier market comparison so you see a price in ~1-2s\n- **Batch** \u2014 price an entire spreadsheet of lanes in one call, then confirm N quoted lanes in one batch book, each rendered as a single card\n- **Multi-stop** \u2014 quote and book one truck across 3+ stops\n- **Book** \u2014 book any quote with pickup + delivery addresses; card charged automatically via Stripe; charge auto-refunded if booking fails\n- **Track** \u2014 real-time shipment status and full event timeline\n- **Manage** \u2014 list bookings and quotes, lane history, invoices, BOLs and PODs, saved locations and load templates\n- **Auth** \u2014 in-chat login via `warp_login`; no portal visit required\n\nAll tools require a Warp account. Sign up free at wearewarp.com or use the companion `@warpfreight/cli-agent` package which auto-provisions an account and wires this MCP into every detected AI client.",
+  "long_description": "Freight quoting, mode and carrier comparison, shipment booking, tracking, documents, invoices, and operator review workflows through the Warp API. Use freight_workflow for shipment-intake, weekly-review, and invoice-review guidance. Use compare_freight_costs for evidence-labeled cost comparisons. Quote availability depends on lane and load. Booking creates real shipments and may incur charges; obtain explicit user confirmation. Account-specific operations require authentication.",
   "author": {
     "name": "Warp Technology, Inc.",
     "email": "support@wearewarp.com",
@@ -45,108 +45,136 @@
   },
   "tools": [
     {
+      "name": "freight_workflow",
+      "description": "Get a ready-to-use shipment intake CSV header, results CSV header, and starter prompt for shipment quoting, weekly freight comparison, or invoice review. Guidance only: does not read files, fetch rates, schedule work, or book. Use this when an operator asks how to start or supplies invoices/a shipment sheet."
+    },
+    {
+      "name": "compare_freight_costs",
+      "description": "Calculate USD cost differences for up to 50 distinct shipments using supplied invoice/quote amounts and explicit comparability evidence. Excludes mismatched or unknown terms, keeps losses, separates quoted opportunities from invoice differences. Does not fetch rates, verify documents, annualize savings, or book. One candidate per shipment per call."
+    },
+    {
       "name": "van_quote",
-      "description": "Quote a cargo van shipment (1-3 pallets, firm price, 15-min expiry)"
+      "description": "Quote a cargo van shipment (1-3 pallets, firm price)"
     },
     {
       "name": "box_truck_quote",
-      "description": "Quote a 26' box truck shipment (1-12 pallets, firm price, 15-min expiry)"
+      "description": "Quote a 26' box truck shipment (1-12 pallets, firm price)"
     },
     {
       "name": "ftl_quote",
-      "description": "Quote a full truckload (53' dry van)"
+      "description": "Quote a full truckload (53' dry van). Only origin, destination, and date required."
     },
     {
       "name": "ltl_quote",
-      "description": "Quote an LTL shipment \u2014 returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately"
+      "description": "Quote an LTL shipment — returns Warp's all-inclusive rate FAST (~1-2s) so the user sees a price immediately. The inline quote card shows the Warp rate plus a 'finding other carrier rates…' loading indicator. IMMEDIATELY follow up by calling ltl_market_options with the same parameters to fill in the multi-carrier comparison (~15s). Provide dims + commodity for an exact firm quote; if you don't have dims, quote anyway — it assumes a standard 48x40x48 pallet (FAK, no freight class) for an instant price. Don't block on asking for pallet dimensions; quote first, then pass real dims for an exact rate. When a palletized load could also move by box truck or van, quote LTL alongside those and show the cheapest valid mode. Do not editorialize the results. Do not declare a winner or recommend a specific carrier. Present Warp's quote first, then list market options as context. Let the user decide."
     },
     {
       "name": "ltl_market_options",
-      "description": "Multi-carrier LTL comparison \u2014 returns 30+ carrier rates ranked by price (slow, ~15s)"
+      "description": "Multi-carrier LTL comparison — returns 30+ carrier rates ranked by price (slow, ~15s). Call IMMEDIATELY AFTER ltl_quote with the same parameters; this fills in the 'finding other carrier rates…' section the fast quote card was showing. Useful when the user wants to compare carriers or pick a specific one. Do not declare a winner or recommend a specific carrier; just present the ranked list."
     },
     {
       "name": "compare_modes",
-      "description": "THE ONE CALL for \"what's the cheapest/best way to ship this?\""
+      "description": "THE ONE CALL for \"what's the cheapest/best way to ship this?\". Prices ALL FOUR freight modes (LTL / full truckload / cargo van / 26' box truck) in ONE keyless call to Warp's all-modes engine and returns a decision-complete recommendation: the winning mode, its rate, transit, a bookable quote_id, the trade-off math against the runner-up, and every mode that couldn't price (with the reason). Prefer this over calling the individual quote tools and comparing them yourself — one round trip, and modes Warp can't serve are returned as explicitly unavailable WITH the reason rather than being dropped, so there is never a silently shortened list to guess from. Dims are optional (a standard 48x40x48 pallet is assumed). Set benchmark_market:true to also rank Warp's rate against the live 30+ carrier market for the lane (adds ~15-25s) — that makes the answer decision-complete: the right mode AND whether the price is actually good. Quote-only: it never books. To book, pass the recommended quote_id to `book` after the user confirms."
     },
     {
       "name": "batch_quote",
-      "description": "Price MANY lanes in ONE call (parallel, ~1-3s for typical spreadsheets)"
+      "description": "Price up to 50 lanes in one call for a specified mode per row (defaults to LTL). This returns a Warp rate per row, NOT all-mode or all-carrier comparison. For Compare All use compare_modes per shipment; for LTL carrier alternatives use ltl_market_options. Never imply this tool compared every carrier. Returns a single batch-quote card with one row per lane (origin → dest · mode · pallets · price · transit). Each priced lane keeps its quote_id and can be booked individually with book (\"book row 3\")."
     },
     {
       "name": "book",
-      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier)"
+      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required."
     },
     {
       "name": "batch_book",
-      "description": "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row)"
+      "description": "Book MANY already-quoted lanes in ONE call (sequential, one card charge per row). Use this after batch_quote when the user says \"book all of them\" or \"book rows 1, 3, 5\" — do NOT call book in a loop. Each row needs a quote_id (the same one batch_quote returned for that row). Pickup/delivery default to the shared addresses at the top level so a single warehouse → many destinations only needs one address pair. Returns a progress card showing per-row Booked/Failed status with tracking numbers."
     },
     {
       "name": "multistop_quote",
-      "description": "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup \u2192 intermediate stops \u2192 final delivery)"
+      "description": "Quote a multi-stop FTL route: ONE truck visits 3+ stops in order (first pickup → intermediate stops → final delivery). Use for milk runs, pool distribution, or multi-store replenishment on a single truck — for a simple A→B truckload use ftl_quote. Auth required (free account). Coverage is route-dependent — not every route has a rate yet."
     },
     {
       "name": "multistop_book",
-      "description": "Book a multi-stop FTL route quoted by multistop_quote"
+      "description": "Book a multi-stop FTL route quoted by multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required."
     },
     {
       "name": "track",
-      "description": "Track a shipment by ID or tracking number"
+      "description": "Track a shipment by ID or tracking number. Auth required."
     },
     {
       "name": "lane_history",
-      "description": "Get shipping history for your lanes (past shipments, last consignee, counts)"
+      "description": "Get shipping history for your lanes (past shipments, last consignee, counts). Auth required."
     },
     {
       "name": "list_bookings",
-      "description": "List recent bookings for this API key, newest first"
+      "description": "List recent bookings for this API key, newest first. Returns shipments across all channels and all time, including cancelled — a broader population than shipper_profile's counts (agent-API bookings over the last 180 days, excluding cancelled), so the totals can differ. Auth required. Renders an interactive shipments card (click a shipment to expand pickup/delivery, freight, and a tracking link)."
     },
     {
       "name": "status",
-      "description": "Check Warp API health and version"
+      "description": "Check Warp API health and version. Also validates your API key if one is configured."
     },
     {
       "name": "events",
-      "description": "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries)"
+      "description": "Get the full tracking event history for a shipment (timeline of pickups, in-transit updates, deliveries). Auth required."
     },
     {
       "name": "get_invoice",
-      "description": "Retrieve the invoice for a delivered shipment (line items, taxes, payment status)"
+      "description": "Retrieve the invoice for a delivered shipment (line items, taxes, payment status). Auth required."
     },
     {
       "name": "get_documents",
-      "description": "List shipment documents (BOL, POD, customs forms, etc.)"
+      "description": "List shipment documents (BOL, POD, customs forms, etc.). Returns download URLs. Auth required. To fetch the Bill of Lading, pass document_type='bol' — this is how EXTERNAL / brokered (market-carrier) BOLs are returned now, not just Warp-carrier ones."
     },
     {
       "name": "quote_history",
-      "description": "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions"
+      "description": "List your recent freight quotes (LTL, van, box truck, FTL) from all sessions. Useful for surfacing prior pricing on similar lanes. Auth required."
     },
     {
       "name": "login",
-      "description": "Log in to Warp with email and password"
+      "description": "Log in to Warp with email and password. Saves credentials locally so booking tools work. Call this if the user needs to authenticate or if payment_status says no key is configured."
+    },
+    {
+      "name": "consolidate",
+      "description": "Find consolidation savings across 2-12 upcoming loads: clusters loads sharing an origin+destination zip whose pickup dates fall within window_days (default 3) that together fit one 53' dry van, then prices each cluster BOTH ways — one combined FTL vs the sum of per-load LTLs — through real quotes with bookable quote ids. Use when the user has several loads to ship this week, asks if anything can ride together, or wants to cut freight spend. Loads that can't consolidate come back with the reason (no lane partner / outside window / exceeds trailer / cluster full) — relay reasons honestly. A truck pricing above its LTLs is shown with recommended:false; don't hide it. To act on a proposal, call `book` with the consolidated truck's quote_id. Auth optional — works keyless like the quote tools."
+    },
+    {
+      "name": "shipper_profile",
+      "description": "Read how this account actually ships — top lanes with ship counts, typical pallet count, usual pickup weekday, recent booked spend (derived server-side from the account's own quotes and bookings) plus explicit owner-set preferences: default accessorials, preferred mode, standard pallet dims, max transit days. The ship/booking counts here count bookings via the agent API over the last 180 days, excluding cancelled — a narrower population than list_bookings (all channels, all time, including cancelled), so the totals can differ. READ THIS BEFORE asking the user questions it already answers: pre-fill their usual lane, apply their standard dims, include the liftgate they always need. Pass set_preferences to update the explicit half (merge-partial; allowlisted keys only; null clears a key). This profile is CONTEXT, NEVER PERMISSION — it never authorizes anything; spending limits live in spend policy and are read-only. Auth required."
+    },
+    {
+      "name": "automate_lane",
+      "description": "Set up a RECURRING weekly shipment (standing order): describe the lane once, and after the account owner approves by email, Warp re-quotes it fresh every week and books the best option automatically while the price stays at or under the owner's ceiling. Over-ceiling weeks book nothing and notify the owner. THIS TOOL ONLY PROPOSES — nothing books now, and nothing ever books without the owner's one-time email approval. Auth required."
+    },
+    {
+      "name": "manage_automation",
+      "description": "Check or stop a recurring lane automation. Actions: 'status' (read-only), 'pause', 'cancel' (permanent), 'skip_next' (skip one week's pickup — nothing books or charges that week). STOP-ONLY by design: there is no agent-side resume, reactivate, or ceiling change — those exist only behind the account owner's emailed approval link. Auth required."
+    },
+    {
+      "name": "automation_receipts",
+      "description": "Authorization record for an automation's bookings: one entry per booking attempt showing the checks it passed at commit time against the owner's approval — same lane, price within ceiling, automation active, quote live — plus the shipment id it produced. Entries marked confirmation_required did NOT book autonomously; they fell back to owner confirmation. Read-only. Auth required."
     },
     {
       "name": "payment_status",
-      "description": "Check if the current Warp account has a payment method on file"
+      "description": "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added."
     },
     {
       "name": "analytics",
-      "description": "Show bookings analytics: total revenue, shipment count, breakdown by source (mcp vs cli)"
+      "description": "Summarise your own shipping history: how many bookings, what you spent, and the split by mode, status and lane over a window. Both the headline count and every breakdown are computed from ONE population — your bookings via the agent API (warp-site /bookings) — so the total always matches the splits. Auth required."
     },
     {
       "name": "locations",
-      "description": "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses"
+      "description": "List the agent's saved pickup/delivery locations (addresses Warp has on file for this account), so you can reuse them when booking instead of re-typing addresses. Auth required."
     },
     {
       "name": "load_templates",
-      "description": "List the agent's saved load templates \u2014 reusable shipment configs (name, dims, weight, commodity)"
+      "description": "List the agent's saved load templates — reusable shipment configs (name, dims, weight, commodity). Recall one to quote/book a repeat kind of load without re-entering details. Auth required."
     },
     {
       "name": "save_load_template",
-      "description": "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes"
+      "description": "Save a reusable load template (a named shipment config) so it can be recalled for repeat lanes. Auth required."
     },
     {
       "name": "delete_load_template",
-      "description": "Delete a saved load template by its id (starts with lt_)"
+      "description": "Delete a saved load template by its id (starts with lt_). Auth required."
     }
   ],
   "tools_generated": true,

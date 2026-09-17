@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WarpClient } from "./client.js";
 import { registerTools } from "./tools.js";
+import { PACKAGE_VERSION } from "./version.js";
 import {
   QUOTE_CARD_RESOURCE_URI,
   QUOTE_CARD_MCP_RESOURCE_URI,
@@ -130,7 +131,7 @@ if (WARP_API_KEY) {
 const server = new McpServer(
   {
     name: "warp-agent-mcp",
-    version: "0.1.0",
+    version: PACKAGE_VERSION,
   },
   {
     instructions: [

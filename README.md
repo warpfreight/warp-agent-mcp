@@ -34,7 +34,7 @@ transaction**, not just the lookup:
 
 ## What it does
 
-31 tools that let an AI agent talk to your Warp account:
+Tools that let an AI agent talk to your Warp account:
 
 | Tool | What it does |
 |---|---|
@@ -187,3 +187,11 @@ Issues and PRs welcome at <https://github.com/warpfreight/warp-agent-mcp>.
 ## License
 
 [MIT](./LICENSE) © Warp Technology, Inc.
+
+## Operator starter workflows
+
+Call `freight_workflow` with `shipment_intake`, `weekly_freight_review`, or `invoice_review` to get a starter prompt, CSV column headers, and review rules. Available in any host that can call MCP tools; no Perplexity-specific skill or scheduler is required. The host reads uploaded files and produces the results. This tool does not upload files, create an Excel workbook, schedule recurring work, or fetch quotes.
+
+`compare_freight_costs` computes differences from supplied USD invoices/quotes with source references and explicit checks for shipment requirements, included charges, and service requirements. It excludes unverified comparisons, keeps negative differences, rejects duplicate shipment IDs, and separates quoted opportunities from invoice differences. It does not independently verify the supplied evidence or claim realized/annual savings.
+
+For multi-mode review use `compare_modes` per shipment. `batch_quote` returns one requested mode per row, defaulting to LTL. Use `ltl_market_options` for LTL carrier alternatives. An appointment accessorial is not proof that an appointment has been arranged. Operations must confirm scheduling ownership.
