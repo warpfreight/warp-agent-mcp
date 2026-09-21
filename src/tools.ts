@@ -2400,7 +2400,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
     // Not readOnlyHint: set_preferences writes (a merge-update of explicit
     // preferences — never limits, which have no write path anywhere).
-    { title: "Shipper Profile" },
+    // Repeating the same preference merge has no additional effect.
+    { title: "Shipper Profile", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async ({ set_preferences }) => {
       const start = Date.now();
       try {
@@ -2463,7 +2464,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       }).passthrough().describe("Lane payload re-quoted each run — same fields as the quote tools (add length_in/width_in/height_in and commodity for firm LTL pricing). pickup_date is set automatically each week"),
       book: z.record(z.unknown()).describe("Booking payload used each run — same shape as the book tool's pickup/delivery addresses and contacts (patch.pickup, patch.delivery). quote_id and reference are set automatically each run"),
     },
-    { title: "Automate a Recurring Lane" },
+    // Creates a proposal and emails the owner; approval is required before booking.
+    { title: "Automate a Recurring Lane", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -2497,7 +2499,8 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       token: z.string().describe("automation token from automate_lane (so_…)"),
       action: z.enum(["status", "pause", "cancel", "skip_next"]).describe("status is read-only; pause/cancel/skip_next stop or shrink the automation"),
     },
-    { title: "Manage an Automation" },
+    // Covers permanent cancellation as well as status; do not assume repeated skips are safe.
+    { title: "Manage an Automation", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     async (params) => {
       const start = Date.now();
       try {
