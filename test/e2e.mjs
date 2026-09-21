@@ -88,15 +88,13 @@ function expect(label, cond, detail) {
 }
 
 async function main() {
-  const key = resolveKey();
-  if (!key) {
-    console.error("Missing WARP_API_KEY (or ~/.warp/config.json). Skipping e2e.");
-    process.exit(0); // soft-skip in CI envs without a key
-  }
+  const key = process.env.WARP_SCHEMA_ONLY === "1" ? undefined : resolveKey();
+  const schemaOnly = !key;
+  if (schemaOnly) console.log("Running schema-only checks; no API calls.");
 
   const proc = spawn(process.execPath, [RUN_MJS], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, WARP_API_KEY: key },
+    env: { ...process.env, WARP_API_KEY: key ?? "schema-only-not-a-real-key" },
   });
 
   let buf = "";
@@ -166,6 +164,14 @@ async function main() {
   const list = await call("tools/list", {});
   const names = (list.result?.tools ?? []).map((t) => t.name).sort();
   expect(`tools count is ${EXPECTED_TOOLS.length}`, names.length === EXPECTED_TOOLS.length, `got ${names.length}`);
+  for (const t of list.result?.tools ?? []) {
+    const a = t.annotations ?? {};
+    expect(
+      `annotated: ${t.name} declares readOnlyHint true or an explicit destructiveHint`,
+      a.readOnlyHint === true || typeof a.destructiveHint === "boolean",
+      JSON.stringify(a),
+    );
+  }
   for (const t of EXPECTED_TOOLS) {
     expect(`registered: ${t}`, names.includes(t));
   }
@@ -199,6 +205,12 @@ async function main() {
     "book inputSchema contains no $ref (clients can't dereference)",
     !JSON.stringify(bookTool?.inputSchema ?? {}).includes("$ref"),
   );
+
+  if (schemaOnly) {
+    console.log(failures === 0 ? "\n✅ schema checks passed" : `\n❌ ${failures} check(s) failed`);
+    proc.kill();
+    process.exit(failures === 0 ? 0 : 1);
+  }
 
   // ── status ─────────────────────────────────────────────────
   console.log("\n== status ==");

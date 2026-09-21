@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "Freight quoting, mode and carrier comparison, shipment booking, tracking, documents, invoices, and operator review workflows through the Warp API. Use freight_workflow for shipment-intake, weekly-review, and invoice-review guidance. Use compare_freight_costs for evidence-labeled cost comparisons. Quote availability depends on lane and load. Booking creates real shipments and may incur charges; obtain explicit user confirmation. Account-specific operations require authentication.",
   "author": {
