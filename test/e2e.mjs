@@ -154,7 +154,7 @@ async function main() {
   notify("notifications/initialized", {});
 
   await new Promise((r) => setTimeout(r, 200));
-  expect(
+  if (!schemaOnly) expect(
     "API key loaded message in stderr",
     stderr.join("").includes("[warp-mcp] API key loaded"),
   );
