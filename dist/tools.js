@@ -1236,15 +1236,17 @@ export function registerTools(server, client, getApiKey) {
         street: z.string().describe("Street address"),
         contactName: z.string().describe("Contact full name"),
         phone: z.string().describe("Phone number"),
-        // Consignee email is frequently unknown to the shipper, so it's optional
-        // on delivery (unlike pickup, where it's required).
-        email: z.string().optional().describe("Email address (optional — consignee email is often unknown)"),
+        // /api/v1/book rejects any delivery missing zipCode, city, state, street,
+        // contactName, phone or email (INCOMPLETE_DELIVERY) and never fills it
+        // from a past shipment. This was optional here, so agents never asked for
+        // it and every such booking was rejected (Highstock, 2026-09-28).
+        email: z.string().describe("Delivery contact email. Required by Warp on every booking: ask the user for it if you don't have it."),
         specialInstruction: z.string().optional().describe("Special instructions"),
     });
-    tool("book", "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required.", {
+    tool("book", "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id and the full delivery address with the delivery contact's name, phone and email, every time. Pickup can be omitted only when a default shipper is saved on the account. Collect any missing delivery details from the user BEFORE calling. Auth required.", {
         quote_id: z.string().describe("Quote ID from warp_quote_id (Warp) or id field of any market option returned by a quote tool. Use the id from your MOST RECENT quote — market-option ids rotate on every quote call and stale ids are rejected."),
         pickup: pickupSchema.optional().describe("Pickup address. Required if no default shipper is saved on your account."),
-        delivery: deliverySchema.optional().describe("Delivery address. Required if this lane has not been shipped before."),
+        delivery: deliverySchema.describe("Delivery address and delivery contact. Required on every booking, with every field: street, city, state, ZIP, contact name, phone and email. Warp never fills delivery from past shipments. Ask the user for anything missing before calling book."),
         notes: z.string().optional().describe("Special instructions for the shipment"),
         reference: z.string().optional().describe("Your internal reference number"),
         accessorials: z.object({
@@ -1385,9 +1387,9 @@ export function registerTools(server, client, getApiKey) {
             delivery: z.object({
                 zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
                 contactName: z.string(), phone: z.string(),
-                email: z.string().optional(),
+                email: z.string().describe("Delivery contact email. Required by Warp on every booking."),
                 specialInstruction: z.string().optional(),
-            }).optional().describe("Per-row delivery. Omit to inherit from shared_delivery."),
+            }).optional().describe("Per-row delivery (all fields incl. contact phone and email). Omit to inherit from shared_delivery; one of the two is required."),
             reference: z.string().optional().describe("Per-row reference (PO #, order #). Falls back to shared_reference."),
             notes: z.string().optional().describe("Per-row special instructions. Falls back to shared_notes."),
             accessorials: z.object({
@@ -1405,9 +1407,9 @@ export function registerTools(server, client, getApiKey) {
         shared_delivery: z.object({
             zipCode: z.string().regex(/^\d{5}$/), city: z.string(), state: z.string(), street: z.string(),
             contactName: z.string(), phone: z.string(),
-            email: z.string().optional(),
+            email: z.string().describe("Delivery contact email. Required by Warp on every booking."),
             specialInstruction: z.string().optional(),
-        }).optional().describe("Delivery address applied to every row that doesn't supply its own. Uncommon (usually each row goes somewhere different)."),
+        }).optional().describe("Delivery address (all fields incl. contact phone and email) applied to every row that doesn't supply its own. Uncommon (usually each row goes somewhere different)."),
         shared_reference: z.string().optional().describe("Reference applied to every row without its own."),
         shared_notes: z.string().optional().describe("Notes applied to every row without their own."),
         shared_accessorials: z.object({

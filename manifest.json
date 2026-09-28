@@ -82,7 +82,7 @@
     },
     {
       "name": "book",
-      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id + pickup and delivery addresses. Auth required."
+      "description": "Book a quoted shipment using any quote_id or option id returned from a quote tool (Warp or market carrier). Requires quote_id and the full delivery address with the delivery contact's name, phone and email, every time. Pickup can be omitted only when a default shipper is saved on the account. Collect any missing delivery details from the user BEFORE calling. Auth required."
     },
     {
       "name": "batch_book",
