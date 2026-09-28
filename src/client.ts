@@ -715,6 +715,20 @@ export class WarpClient {
     if (params.notes)  patch.notes    = params.notes;
     if (Object.keys(patch).length > 0) body.patch = patch;
     if (params.reference) body.reference = params.reference;
+    // Standard Warp quotes (PRICING_ ids) book through gw's firm endpoint,
+    // which drops a top-level reference and keeps only a per-stop refNum; the
+    // BOL "Reference Number" reads the pickup stop's. Put the reference there
+    // too (S-121509-2639, 2026-09-28, printed N/A). Market-option ids book
+    // through gw's marketplace endpoint, where /api/v1/book already adds the
+    // top-level reference to the pickup refs, so adding it here would print it
+    // twice.
+    if (
+      typeof params.reference === "string" && params.reference.trim() &&
+      String(params.quote_id ?? "").startsWith("PRICING_") &&
+      patch.pickup && !(patch.pickup as Record<string, unknown>).refNum
+    ) {
+      (patch.pickup as Record<string, unknown>).refNum = params.reference.trim();
+    }
     // Top-level per the /api/v1/book contract: accessorials {pickup[],delivery[]}
     // and optional pickup_window/delivery_window ({from,to} as HH:MM).
     if (params.accessorials)    body.accessorials    = params.accessorials;

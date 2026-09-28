@@ -44,4 +44,17 @@ const t = bookingPendingText("wq_TEST123");
 assert.match(t, /STILL PROCESSING \(not failed\)/);
 assert.match(t, /Do NOT get a new quote/);
 assert.match(t, /SAME quote_id \(wq_TEST123\)/);
-console.log("book-pending: 5/5 ok");
+// 6. reference reaches the pickup stop on standard (PRICING_) quotes only
+let sent;
+globalThis.fetch = async (url, init) => { sent = JSON.parse(init.body); return new Response(JSON.stringify({ shipment_number: "S-2" }), { status: 200 }); };
+console.error = () => {};
+const addr = { zipCode: "10913", city: "Blauvelt", state: "NY", street: "1 Main", contactName: "A", phone: "1", email: "a@b.c" };
+await client.book({ quote_id: "PRICING_abc", reference: "5289775 / 37585", pickup: addr, delivery: addr });
+assert.equal(sent.patch.pickup.refNum, "5289775 / 37585");
+assert.equal(sent.reference, "5289775 / 37585");
+await client.book({ quote_id: "01M3MKNZCRCVD633WWE6BNYG8T", reference: "SG 1 · PO 2", pickup: addr, delivery: addr });
+assert.equal(sent.patch.pickup.refNum, undefined, "market-option bookings must not get a second copy");
+await client.book({ quote_id: "PRICING_abc", pickup: addr, delivery: addr });
+assert.equal(sent.patch.pickup.refNum, undefined, "no reference, no refNum");
+globalThis.fetch = realFetch; console.error = origErr;
+console.log("book-pending: 6/6 ok");
