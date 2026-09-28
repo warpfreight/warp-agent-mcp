@@ -193,13 +193,19 @@ async function main() {
   expect("pickup advertised as type:object", props.pickup?.type === "object");
   expect("delivery advertised as type:object", props.delivery?.type === "object");
   expect("delivery has a properties block", !!props.delivery?.properties);
+  // /api/v1/book rejects a delivery missing any of these (INCOMPLETE_DELIVERY),
+  // email included, and never reuses a past delivery. The schema used to leave
+  // email optional, so agents never asked for it (Highstock, 2026-09-28).
   expect(
-    "delivery requires the core address fields (not email)",
+    "delivery requires every field the API requires (incl. email)",
     Array.isArray(props.delivery?.required) &&
-      ["zipCode", "city", "state", "street", "contactName", "phone"].every((f) =>
+      ["zipCode", "city", "state", "street", "contactName", "phone", "email"].every((f) =>
         props.delivery.required.includes(f),
-      ) &&
-      !props.delivery.required.includes("email"),
+      ),
+  );
+  expect(
+    "book requires delivery itself",
+    Array.isArray(bookTool?.inputSchema?.required) && bookTool.inputSchema.required.includes("delivery"),
   );
   expect(
     "book inputSchema contains no $ref (clients can't dereference)",
