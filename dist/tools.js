@@ -1,6 +1,6 @@
 import { registerWorkflows } from "./workflows.js";
 import { z } from "zod";
-import { WarpApiError, USER_AGENT } from "./client.js";
+import { WarpApiError, BookingPendingError, USER_AGENT } from "./client.js";
 import { trackEvent, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, checkProhibited, isCanadianPostal, coverageGapRefusal } from "./policy.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, renderQuoteCard, toWidgetData, } from "./widgets/quote-card.js";
@@ -121,6 +121,14 @@ function bookingsToolResult(data) {
         result._meta = { "openai/outputTemplate": BOOKINGS_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...BOOKINGS_UI_META };
     }
     return result;
+}
+/** What the agent must do when a booking's outcome is not known yet. */
+export function bookingPendingText(quoteId) {
+    return [
+        `BOOKING STILL PROCESSING (not failed). Quote ${quoteId} is being booked; Warp bookings take 30-60 seconds and this one had not finished when this call returned.`,
+        `Do NOT get a new quote and do NOT tell the user it failed, timed out with nothing booked, or was not charged. The outcome is not known yet.`,
+        `Next step: wait about 20 seconds, then call book again with the SAME quote_id (${quoteId}) and the same details. If the first attempt went through you get its confirmation back; Warp never creates a second booking or a second charge for the same quote_id. You can also check list_bookings.`,
+    ].join("\n");
 }
 function errText(err) {
     if (err instanceof WarpApiError)
@@ -1287,6 +1295,11 @@ export function registerTools(server, client, getApiKey) {
                 data = await client.book(body);
             }
             catch (bookErr) {
+                if (bookErr instanceof BookingPendingError) {
+                    // Not a failure and not an error result: an agent that reads
+                    // "failed" re-quotes and books the load twice.
+                    return { content: [{ type: "text", text: bookingPendingText(String(params.quote_id)) }] };
+                }
                 const m = errText(bookErr);
                 const stale = /quote.*expired|quote.*not valid|quote.*superseded|quoteId is not valid/i.test(m);
                 const noCard = /no payment|payment method|card on file|402/i.test(m);

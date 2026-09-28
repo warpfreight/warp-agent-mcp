@@ -8,6 +8,22 @@ export declare class WarpApiError extends Error {
     body: unknown;
     constructor(status: number, body: unknown);
 }
+/**
+ * A booking whose outcome is not known yet: the call ran past our wait, or the
+ * API reported the same quote_id is mid-booking. NOT a failure. /api/v1/book
+ * is idempotent per quote_id (a repeat returns the original booking, a
+ * concurrent repeat gets 409 BOOKING_IN_PROGRESS), so the only safe next step
+ * is to call book again with the SAME quote_id, never to re-quote.
+ */
+export declare class BookingPendingError extends Error {
+    quoteId: string;
+    reason: "timeout" | "in_progress";
+    constructor(quoteId: string, reason: "timeout" | "in_progress");
+}
+/** How long one /api/v1/book call may take before it is reported as pending.
+ *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
+ *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
+export declare const BOOK_TIMEOUT_MS: number;
 export declare const USER_AGENT = "warp-agent-mcp/0.20.1";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
@@ -118,6 +134,7 @@ export declare class WarpClient {
         amount_usd?: number;
         raw?: Record<string, unknown>;
         error?: string;
+        pending?: boolean;
     }>>;
     private _selfServe;
     /** GET /api/v1/locations — the agent's saved pickup/delivery locations. */

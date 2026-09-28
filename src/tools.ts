@@ -3,7 +3,7 @@ import { McpServer, type ToolCallback, type RegisteredTool } from "@modelcontext
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { WarpClient, WarpApiError, USER_AGENT, type MarketOptionsResult } from "./client.js";
+import { WarpClient, WarpApiError, BookingPendingError, USER_AGENT, type MarketOptionsResult } from "./client.js";
 import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
 import { checkCommodity, checkProhibited, isCanadianPostal, CANADA_POLICY, coverageGapRefusal } from "./policy.js";
 import {
@@ -165,6 +165,15 @@ function bookingsToolResult(data: Record<string, unknown>): CallToolResult {
     result._meta = { "openai/outputTemplate": BOOKINGS_CARD_RESOURCE_URI, "openai/widgetAccessible": true, "openai/resultCanProduceWidget": true, ...BOOKINGS_UI_META };
   }
   return result;
+}
+
+/** What the agent must do when a booking's outcome is not known yet. */
+export function bookingPendingText(quoteId: string): string {
+  return [
+    `BOOKING STILL PROCESSING (not failed). Quote ${quoteId} is being booked; Warp bookings take 30-60 seconds and this one had not finished when this call returned.`,
+    `Do NOT get a new quote and do NOT tell the user it failed, timed out with nothing booked, or was not charged. The outcome is not known yet.`,
+    `Next step: wait about 20 seconds, then call book again with the SAME quote_id (${quoteId}) and the same details. If the first attempt went through you get its confirmation back; Warp never creates a second booking or a second charge for the same quote_id. You can also check list_bookings.`,
+  ].join("\n");
 }
 
 function errText(err: unknown): string {
@@ -1391,6 +1400,11 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         try {
           data = await client.book(body) as Record<string, unknown>;
         } catch (bookErr) {
+          if (bookErr instanceof BookingPendingError) {
+            // Not a failure and not an error result: an agent that reads
+            // "failed" re-quotes and books the load twice.
+            return { content: [{ type: "text", text: bookingPendingText(String(params.quote_id)) }] };
+          }
           const m = errText(bookErr);
           const stale = /quote.*expired|quote.*not valid|quote.*superseded|quoteId is not valid/i.test(m);
           const noCard = /no payment|payment method|card on file|402/i.test(m);

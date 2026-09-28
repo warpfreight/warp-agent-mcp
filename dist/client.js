@@ -14,6 +14,27 @@ export class WarpApiError extends Error {
         this.name = "WarpApiError";
     }
 }
+/**
+ * A booking whose outcome is not known yet: the call ran past our wait, or the
+ * API reported the same quote_id is mid-booking. NOT a failure. /api/v1/book
+ * is idempotent per quote_id (a repeat returns the original booking, a
+ * concurrent repeat gets 409 BOOKING_IN_PROGRESS), so the only safe next step
+ * is to call book again with the SAME quote_id, never to re-quote.
+ */
+export class BookingPendingError extends Error {
+    quoteId;
+    reason;
+    constructor(quoteId, reason) {
+        super(`Booking for ${quoteId} is still processing (${reason})`);
+        this.quoteId = quoteId;
+        this.reason = reason;
+        this.name = "BookingPendingError";
+    }
+}
+/** How long one /api/v1/book call may take before it is reported as pending.
+ *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
+ *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
+export const BOOK_TIMEOUT_MS = Number(process.env.WARP_BOOK_TIMEOUT_MS) || 50_000;
 const CLIENT_VERSION = PACKAGE_VERSION;
 // Distinctive UA so MCP traffic is self-identifying server-side (attribution).
 // Exported so the tool-layer fetches (login/apikey/quote-log/version/me) send it too.
@@ -455,6 +476,18 @@ export class WarpClient {
                 });
             }
             catch (err) {
+                if (err instanceof BookingPendingError) {
+                    results.push({
+                        row: i + 1,
+                        ok: false,
+                        pending: true,
+                        quote_id: quoteId,
+                        pickup_zip: pickupZip,
+                        delivery_zip: deliveryZip,
+                        error: `Still processing, not failed. Call book again with quote_id ${quoteId} in about 20 seconds to get its confirmation (safe: never a second booking or charge). Do not re-quote this row.`,
+                    });
+                    continue;
+                }
                 const msg = err instanceof Error ? err.message : String(err);
                 results.push({
                     row: i + 1,
@@ -602,10 +635,28 @@ export class WarpClient {
         const headers = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
         if (key)
             headers["Authorization"] = `Bearer ${key}`;
-        const res = await fetch(url, {
-            method: "POST", headers, body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30000),
-        });
+        const quoteId = String(params.quote_id ?? "");
+        const started = Date.now();
+        // One line per booking call to stderr (safe for stdio MCP, lands in the
+        // hosted connector's function logs): outcome, timing and the API's error
+        // code / missing field names. No addresses, contacts or keys.
+        const logBook = (o) => console.error(JSON.stringify({ evt: "warp_book", quote: quoteId.slice(0, 16), ms: Date.now() - started, ...o }));
+        let res;
+        try {
+            res = await fetch(url, {
+                method: "POST", headers, body: JSON.stringify(body),
+                signal: AbortSignal.timeout(BOOK_TIMEOUT_MS),
+            });
+        }
+        catch (err) {
+            const e = err;
+            if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+                logBook({ outcome: "pending", reason: "timeout" });
+                throw new BookingPendingError(quoteId, "timeout");
+            }
+            logBook({ outcome: "network_error", error: String(e?.message ?? e).slice(0, 160) });
+            throw err;
+        }
         const text = await res.text();
         let json;
         try {
@@ -614,8 +665,16 @@ export class WarpClient {
         catch {
             json = { raw: text };
         }
-        if (!res.ok)
+        const j = (json ?? {});
+        if (res.status === 409 && j.code === "BOOKING_IN_PROGRESS") {
+            logBook({ outcome: "pending", reason: "in_progress", status: 409 });
+            throw new BookingPendingError(quoteId, "in_progress");
+        }
+        if (!res.ok) {
+            logBook({ outcome: "rejected", status: res.status, code: j.code ?? null, missing_fields: j.missing_fields ?? null });
             throw new WarpApiError(res.status, json);
+        }
+        logBook({ outcome: "booked", status: res.status, replay: j.idempotent_replay === true, shipment: j.shipment_number ?? j.tracking_number ?? null });
         return json;
     }
     // ── Shipments list (auth) ─────────────────────────────────────
