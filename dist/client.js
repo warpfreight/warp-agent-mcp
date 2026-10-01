@@ -4,6 +4,7 @@
  * Auth: Bearer wak_live_* or wak_test_* key.
  */
 import { PACKAGE_VERSION } from "./version.js";
+import { createHash } from "node:crypto";
 export class WarpApiError extends Error {
     status;
     body;
@@ -583,6 +584,41 @@ export class WarpClient {
     /** GET /api/v1/automations/receipts?token= — per-booking authorization record. */
     async automationReceipts(token) {
         return this._selfServe("GET", "/api/v1/automations/receipts", { query: { token } });
+    }
+    /**
+     * File a problem report with Warp (warp-site POST /api/mcp/feedback, outside
+     * /api/v1). Returns the HTTP status and parsed body instead of throwing, so
+     * the tool can map each documented code (VALIDATION, RATE_LIMITED,
+     * FEEDBACK_DISABLED, ...) to a plain next step. The Idempotency-Key is a hash
+     * of the report body, so a retried call is collapsed server-side, and the
+     * same report sent twice can never hit IDEMPOTENCY_CONFLICT.
+     */
+    async reportIssue(report) {
+        const key = this.getApiKey();
+        const payload = JSON.stringify(report);
+        const headers = {
+            "user-agent": USER_AGENT,
+            ...this.extraHeaders(),
+            "Content-Type": "application/json",
+            "Idempotency-Key": "rpt_" + createHash("sha256").update(payload).digest("hex").slice(0, 40),
+        };
+        if (key)
+            headers["Authorization"] = `Bearer ${key}`;
+        const res = await fetch(`${this.selfServeOrigin}/api/mcp/feedback`, {
+            method: "POST",
+            headers,
+            body: payload,
+            signal: AbortSignal.timeout(15000),
+        });
+        const text = await res.text();
+        let body;
+        try {
+            body = JSON.parse(text);
+        }
+        catch {
+            body = { raw: text.slice(0, 300) };
+        }
+        return { status: res.status, body };
     }
     // ── Booking (auth) ────────────────────────────────────────────
     /**
