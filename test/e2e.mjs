@@ -58,6 +58,7 @@ const EXPECTED_TOOLS = [
   "multistop_book",
   "multistop_quote",
   "payment_status",
+  "report_issue",
   "automate_lane",
   "manage_automation",
   "automation_receipts",

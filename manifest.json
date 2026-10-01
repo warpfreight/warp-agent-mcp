@@ -157,6 +157,10 @@
       "description": "Check if the current Warp account has a payment method on file. Call this if the user asks about their payment status, or before booking if you want to confirm they can book. Returns has_card and onboard_url if a card needs to be added."
     },
     {
+      "name": "report_issue",
+      "description": "Report a problem with Warp's tools to the Warp team. Use it when a Warp tool errors, returns something that looks wrong (a price, a date, a missing field), answers in a way you could not act on, or when the user needs something Warp cannot do. Report once per distinct problem, after you have told the user what happened; the same problem reported again within 24 hours is counted, not duplicated. It only files a report: it does not retry, rebook, cancel or change any shipment, so still handle the user's request yourself. Describe the problem in your own words. Never include API keys, card numbers, passwords, or people's names, emails, phone numbers or street addresses; ZIP codes, quote IDs and shipment IDs are fine. Requires a connected Warp account."
+    },
+    {
       "name": "analytics",
       "description": "Summarise your own shipping history: how many bookings, what you spent, and the split by mode, status and lane over a window. Both the headline count and every breakdown are computed from ONE population — your bookings via the agent API (warp-site /bookings) — so the total always matches the splits. Auth required."
     },

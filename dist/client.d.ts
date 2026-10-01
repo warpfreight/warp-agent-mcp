@@ -154,6 +154,18 @@ export declare class WarpClient {
     /** GET /api/v1/automations/receipts?token= — per-booking authorization record. */
     automationReceipts(token: string): Promise<unknown>;
     /**
+     * File a problem report with Warp (warp-site POST /api/mcp/feedback, outside
+     * /api/v1). Returns the HTTP status and parsed body instead of throwing, so
+     * the tool can map each documented code (VALIDATION, RATE_LIMITED,
+     * FEEDBACK_DISABLED, ...) to a plain next step. The Idempotency-Key is a hash
+     * of the report body, so a retried call is collapsed server-side, and the
+     * same report sent twice can never hit IDEMPOTENCY_CONFLICT.
+     */
+    reportIssue(report: Record<string, unknown>): Promise<{
+        status: number;
+        body: Record<string, unknown>;
+    }>;
+    /**
      * Book a quoted shipment via the self-serve /api/v1/book endpoint.
      * Atomic: Stripe charge + gw.wearewarp.com booking in one server-side call.
      * tools.ts no longer pre-charges via /agents/charge-me — payment is handled

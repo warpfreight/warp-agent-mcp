@@ -5,6 +5,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { WarpClient, WarpApiError, BookingPendingError, USER_AGENT, type MarketOptionsResult } from "./client.js";
 import { trackEvent, getAnalytics, getCustomerEmail } from "./analytics.js";
+import { PACKAGE_VERSION } from "./version.js";
 import { checkCommodity, checkProhibited, isCanadianPostal, CANADA_POLICY, coverageGapRefusal } from "./policy.js";
 import {
   QUOTE_CARD_RESOURCE_URI,
@@ -2577,6 +2578,69 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       } catch {
         return { isError: true, content: [{ type: "text", text: JSON.stringify({ status: "unknown", code: "PAYMENT_STATUS_UNAVAILABLE", retryable: true, message: "Could not reach payment status endpoint. Do not attempt a booking to test billing. Retry the status check or review your account.", account_url: "https://www.wearewarp.com/agents/account" }) }] };
+      }
+    },
+  );
+
+  // ── report_issue ─────────────────────────────────────────
+
+  // Warp-side identifier shape accepted by /api/mcp/feedback (IDENT there).
+  const reportId = z.string().max(120).regex(/^[A-Za-z0-9._:\-]+$/, "letters, digits, dots, colons, hyphens or underscores only");
+
+  tool(
+    "report_issue",
+    "Report a problem with Warp's tools to the Warp team. Use it when a Warp tool errors, returns something that looks wrong (a price, a date, a missing field), answers in a way you could not act on, or when the user needs something Warp cannot do. " +
+      "Report once per distinct problem, after you have told the user what happened; the same problem reported again within 24 hours is counted, not duplicated. " +
+      "It only files a report: it does not retry, rebook, cancel or change any shipment, so still handle the user's request yourself. " +
+      "Describe the problem in your own words. Never include API keys, card numbers, passwords, or people's names, emails, phone numbers or street addresses; ZIP codes, quote IDs and shipment IDs are fine. Requires a connected Warp account.",
+    {
+      category: z.enum(["tool_error", "unexpected_result", "confusing_response", "missing_capability"])
+        .describe("tool_error: a tool failed or returned an error. unexpected_result: it worked but the result looks wrong. confusing_response: you could not tell what to do with the response. missing_capability: the user needed something no Warp tool does."),
+      tool_name: z.string().max(64).regex(/^[a-z0-9_\-]+$/i).describe("The Warp tool involved, e.g. ltl_quote or book. Use the closest tool for missing_capability."),
+      summary: z.string().min(1).max(200).describe("One line: what went wrong"),
+      expected_behavior: z.string().min(1).max(2000).describe("What you or the user expected to happen"),
+      observed_behavior: z.string().min(1).max(2000).describe("What actually happened, including any error code or message returned"),
+      customer_blocked: z.boolean().describe("true if the user could not finish what they were trying to do"),
+      quote_id: reportId.optional().describe("Quote ID involved, if any"),
+      shipment_id: reportId.optional().describe("Shipment ID involved, if any"),
+      request_id: reportId.optional().describe("Request ID from an error response, if any"),
+      error_code: z.string().max(64).regex(/^[A-Za-z0-9._:\-]+$/).optional().describe("Error code returned by the tool, e.g. UPSTREAM_ERROR"),
+      occurred_at: z.string().optional().describe("When it happened, ISO 8601. Defaults to now."),
+    },
+    { title: "Report a Problem to Warp", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async (params) => {
+      const start = Date.now();
+      if (!WARP_API_KEY()) {
+        return { content: [{ type: "text", text: "Reporting needs a connected Warp account. Connect your Warp account to this connector (or run warp-agent login for the local install), then report again." }], isError: true };
+      }
+      const report: Record<string, unknown> = { ...params, client: "warp-agent-mcp", mcp_version: PACKAGE_VERSION };
+      for (const k of Object.keys(report)) if (report[k] === undefined || report[k] === "") delete report[k];
+      try {
+        const { status, body } = await client.reportIssue(report);
+        const code = typeof body.code === "string" ? body.code : undefined;
+        const ok = status === 200 || status === 201;
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: ok ? 'other' : 'error', tool_name: 'warp_report_issue', success: ok, duration_ms: Date.now() - start, ...(ok ? {} : { error_message: code ?? `HTTP ${status}` }) });
+        if (ok) {
+          return { content: [{ type: "text", text: JSON.stringify({
+            received: true,
+            feedback_id: body.feedback_id,
+            duplicate: body.duplicate === true,
+            message: body.duplicate === true
+              ? "Warp already had this report open and counted it again. Reporting does not retry, rebook or cancel anything."
+              : (body.message ?? "Warp received this report."),
+          }, null, 2) }] };
+        }
+        const next =
+          status === 401 ? "The connected Warp account was not recognised. Reconnect your Warp account, then report again." :
+          code === "VALIDATION" ? `The report was rejected: ${body.error}. Fix that and report again.` :
+          code === "RATE_LIMITED" ? "This account has sent too many reports in the last hour. Try again later; this limit does not affect quoting or booking." :
+          code === "PAYLOAD_TOO_LARGE" ? "The report is too long. Shorten the descriptions and report again." :
+          code === "FEEDBACK_DISABLED" ? "Warp is not accepting reports right now. The report was not received." :
+          "Warp could not store the report right now. It was not received; try again later.";
+        return { content: [{ type: "text", text: JSON.stringify({ received: false, code: code ?? `HTTP_${status}`, message: next }, null, 2) }], isError: true };
+      } catch (err) {
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_report_issue', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+        return { content: [{ type: "text", text: JSON.stringify({ received: false, code: "FEEDBACK_UNREACHABLE", message: "Could not reach Warp to file the report. It was not received; try again later." }, null, 2) }], isError: true };
       }
     },
   );
