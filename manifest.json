@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "Freight quoting, mode and carrier comparison, shipment booking, tracking, documents, invoices, and operator review workflows through the Warp API. Use freight_workflow for shipment-intake, weekly-review, and invoice-review guidance. Use compare_freight_costs for evidence-labeled cost comparisons. Quote availability depends on lane and load. Booking creates real shipments and may incur charges; obtain explicit user confirmation. Account-specific operations require authentication.",
   "author": {
@@ -163,6 +163,10 @@
     {
       "name": "analytics",
       "description": "Summarise your own shipping history: how many bookings, what you spent, and the split by mode, status and lane over a window. Both the headline count and every breakdown are computed from ONE population — your bookings via the agent API (warp-site /bookings) — so the total always matches the splits. Auth required."
+    },
+    {
+      "name": "price_check",
+      "description": "Judge a price against what THIS account has actually paid on the same lane and mode (its own bookings over the last 180 days, cancelled excluded; LTL compared per pallet). Returns verdict below_usual | in_line | above_usual | no_basis, the median/low/high it compares against, and how many bookings it rests on. Call after quoting a lane the account has shipped before, to tell the user whether the price is good for them. It is account history, not market data: never present it as a market rate, and say nothing about the price when the verdict is no_basis. Auth required."
     },
     {
       "name": "locations",
