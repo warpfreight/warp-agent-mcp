@@ -24,7 +24,7 @@ export declare class BookingPendingError extends Error {
  *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
  *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
 export declare const BOOK_TIMEOUT_MS: number;
-export declare const USER_AGENT = "warp-agent-mcp/0.20.1";
+export declare const USER_AGENT = "warp-agent-mcp/0.21.0";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
  *  last-good cached spread). The caller surfaces these instead of dropping the

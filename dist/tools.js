@@ -3,6 +3,7 @@ import { z } from "zod";
 import { WarpApiError, BookingPendingError, USER_AGENT } from "./client.js";
 import { trackEvent, getCustomerEmail } from "./analytics.js";
 import { PACKAGE_VERSION } from "./version.js";
+import { priceContext } from "./price.js";
 import { checkCommodity, checkProhibited, isCanadianPostal, coverageGapRefusal } from "./policy.js";
 import { QUOTE_CARD_RESOURCE_URI, QUOTE_CARD_MCP_RESOURCE_URI, renderQuoteCard, toWidgetData, } from "./widgets/quote-card.js";
 import { BOOKINGS_CARD_RESOURCE_URI, BOOKINGS_CARD_MCP_RESOURCE_URI, renderBookingsCard, toBookingsWidgetData, trackingUrl, } from "./widgets/bookings-card.js";
@@ -2461,6 +2462,33 @@ export function registerTools(server, client, getApiKey) {
         }
         catch (err) {
             return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
+    // ── price_check ─────────────────────────────────────────
+    tool("price_check", "Judge a price against what THIS account has actually paid on the same lane and mode (its own bookings over the last 180 days, cancelled excluded; LTL compared per pallet). Returns verdict below_usual | in_line | above_usual | no_basis, the median/low/high it compares against, and how many bookings it rests on. Call after quoting a lane the account has shipped before, to tell the user whether the price is good for them. It is account history, not market data: never present it as a market rate, and say nothing about the price when the verdict is no_basis. Auth required.", {
+        mode: z.enum(["ltl", "ftl", "van", "box_truck"]).describe("Mode of the price being judged"),
+        origin_zip: z.string().describe("Origin ZIP"),
+        destination_zip: z.string().describe("Destination ZIP"),
+        price_usd: z.number().positive().describe("The price to judge, in USD"),
+        pallets: z.number().int().positive().optional().describe("Pallet count (LTL is compared per pallet when given)"),
+    }, { title: "Check Price Against History", readOnlyHint: true }, async (params) => {
+        const apiKey = WARP_API_KEY();
+        if (!apiKey) {
+            return { content: [{ type: "text", text: "No API key found. Connect your Warp account to this connector (or run warp-agent login for the local install)." }], isError: true };
+        }
+        try {
+            const res = await fetch("https://www.wearewarp.com/api/v1/bookings?limit=100", {
+                headers: { "Authorization": `Bearer ${apiKey}`, "user-agent": USER_AGENT },
+                signal: AbortSignal.timeout(15000),
+            });
+            if (!res.ok)
+                throw new Error(`bookings HTTP ${res.status}`);
+            const rows = pickRows(await res.json());
+            const out = priceContext(rows, params);
+            return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
+        }
+        catch (err) {
+            return { content: [{ type: "text", text: `Price history unavailable: ${errText(err)}. Say nothing about whether the price is good.` }], isError: true };
         }
     });
     // ── locations ─────────────────────────────────────────
