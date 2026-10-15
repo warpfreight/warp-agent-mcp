@@ -2,7 +2,7 @@ import { z } from "zod";
 const intake = "shipment_id,origin_zip,destination_zip,pickup_date,pallets,weight_lbs_per_pallet,length_in,width_in,height_in,commodity,mode_preference,pickup_services,delivery_services,baseline_amount_usd,baseline_source,notes\n";
 const results = "shipment_id,quote_id,carrier,served_mode,quote_amount_usd,quote_tier,expires_at,transit,baseline_amount_usd,baseline_source,comparison_status,cost_difference_usd,appointment_owner,missing_details\n";
 const rules = [
-    "Quote and review only. Never call book, batch_book, multistop_book, or automate_lane without a separate explicit user instruction and confirmation of the specific transaction.",
+    "Quote and review only. Never call book, batch_book, multistop_book, parcel_book, or automate_lane without a separate explicit user instruction and confirmation of the specific transaction.",
     "Preserve shipment IDs, exact dates, ZIP leading zeros, weights, dimensions and accessorials. Ask about missing or ambiguous values; never silently move pickup dates. Surface indicative quotes and assumptions.",
     "For Compare All, call compare_modes for each shipment. batch_quote quotes a requested mode per row, defaulting to LTL; it does NOT compare every mode or all carriers. Use ltl_market_options for LTL carrier comparisons.",
     "Do not infer service quality from price or transit estimates. An appointment accessorial is not proof that an appointment is scheduled or that Warp owns the scheduling call. Mark appointment ownership unconfirmed until operations confirms it.",

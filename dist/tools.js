@@ -1371,6 +1371,113 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
+    // ── 5a. parcel_quote / parcel_book (FedEx, through gw) ──────
+    // Small packages, US domestic. warp-site /api/v1/parcel/options returns every
+    // option gw returns: each FedEx service level once per pickup type. Separate
+    // from the pallet tools on purpose: parcel quote_ids book only through
+    // parcel_book (/api/v1/parcel/book), never through book.
+    const parcelPackageSchema = z.object({
+        name: z.string().optional().describe("Label for this package group, e.g. 'Box A'"),
+        quantity: z.number().int().min(1).default(1).describe("Number of identical packages in this group"),
+        length_in: z.number().positive().describe("Length of ONE package, inches"),
+        width_in: z.number().positive().describe("Width of ONE package, inches"),
+        height_in: z.number().positive().describe("Height of ONE package, inches"),
+        weight_lbs: z.number().positive().describe("Weight of ONE package, lb (FedEx limit 150 lb per package)"),
+    });
+    tool("parcel_quote", "FedEx parcel rates for small packages (boxes, not pallets), US domestic ZIPs. Returns every FedEx option for the lane, cheapest first: each service level (Ground, Express Saver, 2Day, Overnight, ...) once per pickup type. pickup_type 'fedex_pickup' means FedEx collects at the pickup address; 'dropoff' means someone takes the package to a FedEx location. Show the user the options (including which are drop-off) and let them choose; book the chosen one with parcel_book. FedEx limits per package: 150 lb, longest side 108 in, length + girth 165 in. Pickup date must be within 10 days. Requires a signed-in Warp account.", {
+        origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit US pickup ZIP"),
+        destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit US delivery ZIP"),
+        pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("YYYY-MM-DD, today through 10 days out"),
+        packages: z.array(parcelPackageSchema).min(1).max(50).describe("One entry per group of identical packages"),
+    }, { title: "Get Parcel Rates (FedEx)", readOnlyHint: true }, async (params) => {
+        const start = Date.now();
+        try {
+            if (!WARP_API_KEY()) {
+                return { content: [{ type: "text", text: "Parcel rates need a Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+            }
+            const data = await client.parcelOptions({
+                origin_zip: params.origin_zip,
+                destination_zip: params.destination_zip,
+                pickup_date: params.pickup_date,
+                packages: params.packages,
+            });
+            const options = Array.isArray(data.options) ? data.options : [];
+            for (const o of options) {
+                if (typeof o.quote_id === "string" && typeof o.price_usd === "number")
+                    quoteAmountCache.set(o.quote_id, o.price_usd);
+            }
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'quote', tool_name: 'warp_parcel_quote', mode: 'parcel', success: true, origin_zip: params.origin_zip, dest_zip: params.destination_zip, duration_ms: Date.now() - start });
+            const guidance = options.length
+                ? "Present every option with its price, service, pickup_type and estimated delivery. Drop-off options need someone to take the package to a FedEx location. Book only after the user picks one, with parcel_book and that option's quote_id."
+                : "FedEx returned no rate. Check the ZIPs, package sizes and pickup date, or quote the load as LTL if it is palletized.";
+            return { content: [{ type: "text", text: `${JSON.stringify(data, null, 2)}\n\n${guidance}` }] };
+        }
+        catch (err) {
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_parcel_quote', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
+    const parcelStopSchema = z.object({
+        zipCode: z.string().regex(/^\d{5}$/).describe("5-digit ZIP; must match the quoted ZIP"),
+        city: z.string().describe("City"),
+        state: z.string().describe("2-letter state code"),
+        street: z.string().describe("Street address"),
+        street2: z.string().optional().describe("Suite / unit"),
+        contactName: z.string().describe("Contact full name"),
+        phone: z.string().describe("Contact phone. FedEx requires it on both stops: ask the user if you don't have it."),
+        email: z.string().optional().describe("Contact email"),
+        company: z.string().optional().describe("Company / location name"),
+        specialInstruction: z.string().optional().describe("Instructions for this stop"),
+        refNum: z.string().optional().describe("Reference for this stop (PO/SO)"),
+    });
+    tool("parcel_book", "Book a FedEx parcel option from parcel_quote. Requires the quote_id the user chose and the full delivery address with contact name and phone; pickup can be omitted only when a default shipper is saved. ZIPs must match the quote. The packages are the ones quoted (not resent). Charges the account like book does (terms accounts are billed on terms; others pay from the Warp balance, with the saved card covering any shortfall). Only call after the user explicitly confirms this option and price. Auth required.", {
+        quote_id: z.string().describe("quote_id of the option the user chose, from your MOST RECENT parcel_quote"),
+        pickup: parcelStopSchema.optional().describe("Pickup address. Required if no default shipper is saved."),
+        delivery: parcelStopSchema.describe("Delivery address and contact, every required field"),
+        reference: z.string().optional().describe("Your reference (PO, order number)"),
+        pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local pickup window, 24h HH:MM. Defaults to 08:00-20:00."),
+        delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local delivery window, 24h HH:MM. Defaults to 08:00-20:00."),
+    }, { title: "Book Parcel (FedEx)", destructiveHint: true }, async (params) => {
+        const start = Date.now();
+        try {
+            if (!WARP_API_KEY()) {
+                return { content: [{ type: "text", text: "Booking requires your own Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+            }
+            const body = {
+                quote_id: params.quote_id,
+                patch: { ...(params.pickup ? { pickup: params.pickup } : {}), delivery: params.delivery },
+                ...(params.reference ? { reference: params.reference } : {}),
+                ...(params.pickup_window ? { pickup_window: params.pickup_window } : {}),
+                ...(params.delivery_window ? { delivery_window: params.delivery_window } : {}),
+            };
+            let data;
+            try {
+                data = await client.parcelBook(body);
+            }
+            catch (bookErr) {
+                if (bookErr instanceof BookingPendingError) {
+                    return { content: [{ type: "text", text: [
+                                    `BOOKING STILL PROCESSING (not failed). Parcel quote ${params.quote_id} is being booked and had not finished when this call returned.`,
+                                    `Do NOT re-quote and do NOT tell the user it failed or was not charged. The outcome is not known yet.`,
+                                    `Next step: wait about 20 seconds, then call parcel_book again with the SAME quote_id and details. If the first attempt went through you get its confirmation back; Warp never books or charges the same quote_id twice.`,
+                                ].join("\n") }] };
+                }
+                const m = errText(bookErr);
+                const reason = /no payment|payment method|card on file|PAYMENT_REQUIRED/i.test(m)
+                    ? `No payment method on file. Add a card at https://www.wearewarp.com/agents/account then try again.`
+                    : /QUOTE_EXPIRED|QUOTE_NOT_FOUND/i.test(m)
+                        ? `Booking failed: the parcel quote is expired or unknown. Run parcel_quote again and book a fresh quote_id.`
+                        : `Booking failed: ${m}`;
+                return { content: [{ type: "text", text: reason }], isError: true };
+            }
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'book', tool_name: 'warp_parcel_book', mode: 'parcel', success: true, quote_id: params.quote_id, amount_usd: typeof data.price_usd === "number" ? data.price_usd : quoteAmountCache.get(params.quote_id), tracking_number: data.tracking_number, order_id: data.order_id, dest_zip: params.delivery.zipCode, duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+        }
+        catch (err) {
+            trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_parcel_book', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+            return { content: [{ type: "text", text: agentError(err) }], isError: true };
+        }
+    });
     // ── 5b. batch_book ─────────────────────────────────────────
     // Book N already-quoted lanes in ONE tool call so a full spreadsheet of
     // priced lanes books as a single progress card instead of N noisy per-row

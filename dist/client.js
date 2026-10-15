@@ -725,6 +725,59 @@ export class WarpClient {
         logBook({ outcome: "booked", status: res.status, replay: j.idempotent_replay === true, shipment: j.shipment_number ?? j.tracking_number ?? null });
         return json;
     }
+    /** POST /api/v1/parcel/options: every bookable FedEx parcel option for a US
+     *  lane (each service level once per pickup type). Key required. */
+    async parcelOptions(body) {
+        return this._selfServe("POST", "/api/v1/parcel/options", { body, timeoutMs: 40000 });
+    }
+    /** POST /api/v1/parcel/book: books one parcel option by quote_id. Same
+     *  pending semantics as book(): a timeout or a concurrent duplicate is
+     *  "still processing", never a failure, and a retry with the same quote_id
+     *  returns the original confirmation (single use, no second charge). */
+    async parcelBook(body) {
+        const key = this.getApiKey();
+        const headers = { "user-agent": USER_AGENT, ...this.extraHeaders(), "Content-Type": "application/json" };
+        if (key)
+            headers["Authorization"] = `Bearer ${key}`;
+        const quoteId = String(body.quote_id ?? "");
+        const started = Date.now();
+        const logBook = (o) => console.error(JSON.stringify({ evt: "warp_parcel_book", quote: quoteId.slice(0, 16), ms: Date.now() - started, ...o }));
+        let res;
+        try {
+            res = await fetch(`${this.selfServeOrigin}/api/v1/parcel/book`, {
+                method: "POST", headers, body: JSON.stringify(body),
+                signal: AbortSignal.timeout(BOOK_TIMEOUT_MS),
+            });
+        }
+        catch (err) {
+            const e = err;
+            if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+                logBook({ outcome: "pending", reason: "timeout" });
+                throw new BookingPendingError(quoteId, "timeout");
+            }
+            logBook({ outcome: "network_error", error: String(e?.message ?? e).slice(0, 160) });
+            throw err;
+        }
+        const text = await res.text();
+        let json;
+        try {
+            json = JSON.parse(text);
+        }
+        catch {
+            json = { raw: text };
+        }
+        const j = (json ?? {});
+        if (res.status === 409 && j.code === "BOOKING_IN_PROGRESS") {
+            logBook({ outcome: "pending", reason: "in_progress", status: 409 });
+            throw new BookingPendingError(quoteId, "in_progress");
+        }
+        if (!res.ok) {
+            logBook({ outcome: "rejected", status: res.status, code: j.code ?? null, missing_fields: j.missing_fields ?? null });
+            throw new WarpApiError(res.status, json);
+        }
+        logBook({ outcome: "booked", status: res.status, replay: j.idempotent_replay === true, booking: j.booking_id ?? null });
+        return json;
+    }
     // ── Shipments list (auth) ─────────────────────────────────────
     listBookings(limit) {
         return this.request("GET", "/freights/shipments", {

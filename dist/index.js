@@ -110,7 +110,9 @@ const server = new McpServer({
         "",
         "PRESENT, DON'T EDITORIALIZE. Show Warp's quote first, then market options as context; surface the cheapest valid mode plainly and let the user choose. Don't crown a single carrier the winner.",
         "",
-        "BOOKING IS NEVER AUTOMATIC. Only book, batch_book, and multistop_book book a shipment, and only after the user explicitly confirms a specific quote.",
+        "BOOKING IS NEVER AUTOMATIC. Only book, batch_book, multistop_book, and parcel_book book a shipment, and only after the user explicitly confirms a specific quote.",
+        "",
+        "PARCEL. Boxes rather than pallets ship FedEx: quote with `parcel_quote`, book the user's chosen option with `parcel_book` (never with `book`).",
     ].join("\n"),
 });
 // Pass loadApiKey as a getter so every tool call re-reads from disk.

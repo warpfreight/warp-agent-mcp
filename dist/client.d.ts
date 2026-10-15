@@ -24,7 +24,7 @@ export declare class BookingPendingError extends Error {
  *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
  *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
 export declare const BOOK_TIMEOUT_MS: number;
-export declare const USER_AGENT = "warp-agent-mcp/0.21.0";
+export declare const USER_AGENT = "warp-agent-mcp/0.22.0";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
  *  last-good cached spread). The caller surfaces these instead of dropping the
@@ -172,6 +172,14 @@ export declare class WarpClient {
      * internally by /api/v1/book using the agent\'s saved card.
      */
     book(params: Record<string, unknown>): Promise<unknown>;
+    /** POST /api/v1/parcel/options: every bookable FedEx parcel option for a US
+     *  lane (each service level once per pickup type). Key required. */
+    parcelOptions(body: Record<string, unknown>): Promise<unknown>;
+    /** POST /api/v1/parcel/book: books one parcel option by quote_id. Same
+     *  pending semantics as book(): a timeout or a concurrent duplicate is
+     *  "still processing", never a failure, and a retry with the same quote_id
+     *  returns the original confirmation (single use, no second charge). */
+    parcelBook(body: Record<string, unknown>): Promise<unknown>;
     listBookings(limit?: number): Promise<unknown>;
     track(shipmentId: string): Promise<unknown>;
     cancel(params: Record<string, unknown>): Promise<unknown>;

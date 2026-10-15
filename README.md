@@ -47,6 +47,8 @@ Tools that let an AI agent talk to your Warp account:
 | `batch_quote` | Quote many lanes in one call (a whole spreadsheet / CSV) |
 | `book` | Book any quote by id, with pickup + delivery addresses |
 | `batch_book` | Book many already-quoted lanes in one call |
+| `parcel_quote` | FedEx parcel rates for small packages (US): every service level and pickup type |
+| `parcel_book` | Book a FedEx parcel option from `parcel_quote` |
 | `multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
 | `multistop_book` | Book a quoted multi-stop route as per-leg shipments |
 | `track` | Track a shipment by id or order id |
