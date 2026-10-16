@@ -1,3 +1,4 @@
+import { consolidateWithModes } from "./consolidation.js";
 import { registerWorkflows } from "./workflows.js";
 import { z } from "zod";
 import { WarpApiError, BookingPendingError, USER_AGENT } from "./client.js";
@@ -2125,12 +2126,10 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── consolidate ──────────────────────────────────────────────
-    // The money-finder: same-lane loads inside a pickup window priced as one
-    // truck vs separate LTLs. All clustering + pricing is server-side; both
-    // sides of every comparison come back as bookable quote ids, so acting on
-    // a proposal is a normal `book` call. Loads that can't consolidate return
-    // with the REASON — relay it, never hide it.
-    tool("consolidate", "Find consolidation savings across 2-12 upcoming loads: clusters loads sharing an origin+destination zip whose pickup dates fall within window_days (default 3) that together fit one 53' dry van, then prices each cluster BOTH ways — one combined FTL vs the sum of per-load LTLs — through real quotes with bookable quote ids. Use when the user has several loads to ship this week, asks if anything can ride together, or wants to cut freight spend. Loads that can't consolidate come back with the reason (no lane partner / outside window / exceeds trailer / cluster full) — relay reasons honestly. A truck pricing above its LTLs is shown with recommended:false; don't hide it. To act on a proposal, call `book` with the consolidated truck's quote_id. Auth optional — works keyless like the quote tools.", {
+    // Keep the API's clustering, then compare combined modes in this MCP call.
+    // The self-serve API contract stays unchanged. Incomplete comparisons must
+    // not silently recommend the legacy FTL-only proposal.
+    tool("consolidate", "Find consolidation savings across 2-12 upcoming loads on the same lane. Automatically compare eligible combined Warp modes (cargo van, box truck, LTL and FTL), select the lowest returned quote, and compare it with separate Warp LTL costs. No follow-up compare_modes call is needed for homogeneous pallets. This is not an all-carrier comparison. Read combined_options for unavailable modes and comparison_complete before recommending. Mixed dimensions/weights or failed comparisons are explicitly incomplete, never silently recommended from FTL alone. Original FTL comparison is retained for reference. Relay pickup-date changes, indicative dimensions and unavailable reasons. Quote only; book only after explicit approval using the selected consolidated_truck.quote_id.", {
         loads: z.array(z.object({
             origin_zip: z.string().regex(/^\d{5}$/).describe("5-digit origin ZIP"),
             destination_zip: z.string().regex(/^\d{5}$/).describe("5-digit destination ZIP"),
@@ -2138,15 +2137,15 @@ export function registerTools(server, client, getApiKey) {
             pallets: z.number().int().min(1).max(26),
             weight_lbs_per_pallet: z.number().int().min(50).max(5000),
             ref: z.string().max(64).optional().describe("Your reference (PO number, order id) — echoed back"),
-            length: z.number().optional().describe("Pallet length in inches (real dims firm up LTL pricing)"),
-            width: z.number().optional(),
-            height: z.number().optional().describe("Pallet height in inches — LTL prices off height above all"),
+            length: z.number().positive().optional().describe("Pallet length in inches (real dims firm up LTL pricing)"),
+            width: z.number().positive().optional(),
+            height: z.number().positive().optional().describe("Pallet height in inches — LTL prices off height above all"),
         })).min(2).max(12).describe("The loads you plan to ship"),
         window_days: z.number().int().min(1).max(7).optional().describe("Loads picking up within this many days of each other may ride together (default 3)"),
     }, { title: "Find Consolidation Savings", readOnlyHint: true }, async (params) => {
         const start = Date.now();
         try {
-            const data = await client.consolidate(params);
+            const data = await consolidateWithModes(client, params);
             trackEvent({
                 product: 'warp-agent',
                 source: 'mcp',
