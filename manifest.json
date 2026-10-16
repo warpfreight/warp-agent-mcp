@@ -134,7 +134,7 @@
     },
     {
       "name": "consolidate",
-      "description": "Find consolidation savings across 2-12 upcoming loads: clusters loads sharing an origin+destination zip whose pickup dates fall within window_days (default 3) that together fit one 53' dry van, then prices each cluster BOTH ways — one combined FTL vs the sum of per-load LTLs — through real quotes with bookable quote ids. Use when the user has several loads to ship this week, asks if anything can ride together, or wants to cut freight spend. Loads that can't consolidate come back with the reason (no lane partner / outside window / exceeds trailer / cluster full) — relay reasons honestly. A truck pricing above its LTLs is shown with recommended:false; don't hide it. To act on a proposal, call `book` with the consolidated truck's quote_id. Auth optional — works keyless like the quote tools."
+      "description": "Find consolidation savings across 2-12 upcoming loads on the same lane. Automatically compare eligible combined Warp modes (cargo van, box truck, LTL and FTL), select the lowest returned quote, and compare it with separate Warp LTL costs. No follow-up compare_modes call is needed for homogeneous pallets. This is not an all-carrier comparison. Read combined_options for unavailable modes and comparison_complete before recommending. Mixed dimensions/weights or failed comparisons are explicitly incomplete, never silently recommended from FTL alone. Original FTL comparison is retained for reference. Relay pickup-date changes, indicative dimensions and unavailable reasons. Quote only; book only after explicit approval using the selected consolidated_truck.quote_id."
     },
     {
       "name": "shipper_profile",
