@@ -17,6 +17,7 @@
  *   WARP_API_KEY  — a wak_test_* sandbox key. Live keys also work but the
  *                   booking-charge protections require the test path.
  */
+import "./consolidation.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -58,6 +59,7 @@ const EXPECTED_TOOLS = [
   "multistop_book",
   "multistop_quote",
   "payment_status",
+  "price_check",
   "report_issue",
   "automate_lane",
   "manage_automation",
