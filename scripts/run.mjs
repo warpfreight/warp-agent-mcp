@@ -16,6 +16,38 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // bundle/ artifact. bundle/ was hand-rolled and prone to going stale relative
 // to src/; dist/ is rebuilt by `npm run build` so what ships matches the source.
 const bundlePath = join(__dirname, "..", "dist", "index.js");
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, "..", "package.json"), "utf8"),
+);
+const HELP_TEXT = `
+warp-agent-mcp
+
+Usage:
+  warp-agent-mcp [options]
+
+Options:
+  -h, --help       Show this help
+  -v, --version    Show the installed version
+`.trim();
+
+const args = process.argv.slice(2);
+const knownMetadataFlags = new Set(["-h", "--help", "-v", "--version"]);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(HELP_TEXT);
+  process.exit(0);
+}
+
+if (args.includes("-v") || args.includes("--version")) {
+  console.log(packageJson.version);
+  process.exit(0);
+}
+
+const unknownArg = args.find((arg) => !knownMetadataFlags.has(arg));
+if (unknownArg) {
+  console.error(`Unknown option: ${unknownArg}`);
+  process.exit(1);
+}
 
 // Read API key from ~/.warp/config.json
 function getApiKey() {

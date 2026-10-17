@@ -36,7 +36,7 @@
     "postinstall": "node scripts/postinstall.mjs",
     "check:desc": "node scripts/check-description.mjs",
     "prepublishOnly": "npm run build && node scripts/check-description.mjs && node scripts/sync-manifest.mjs --check && node test/freight-review.mjs",
-    "test": "node test/refund.mjs && node test/price-check.mjs && node test/parcel.mjs && node test/e2e.mjs",
+    "test": "node test/cli-flags.mjs && node test/refund.mjs && node test/price-check.mjs && node test/parcel.mjs && node test/e2e.mjs",
     "test:call-readiness": "node test/call-readiness.mjs",
     "sync:manifest": "node scripts/sync-manifest.mjs",
     "test:freight-review": "node test/freight-review.mjs"
