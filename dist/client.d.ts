@@ -24,7 +24,7 @@ export declare class BookingPendingError extends Error {
  *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
  *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
 export declare const BOOK_TIMEOUT_MS: number;
-export declare const USER_AGENT = "warp-agent-mcp/0.22.0";
+export declare const USER_AGENT = "warp-agent-mcp/0.23.0";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
  *  last-good cached spread). The caller surfaces these instead of dropping the
@@ -180,6 +180,22 @@ export declare class WarpClient {
      *  "still processing", never a failure, and a retry with the same quote_id
      *  returns the original confirmation (single use, no second charge). */
     parcelBook(body: Record<string, unknown>): Promise<unknown>;
+    /** GET /api/v1/international/settings: whether Air / Ocean is enabled on
+     *  the account and which door services it offers. Key required. */
+    internationalSettings(): Promise<unknown>;
+    /** GET /api/v1/international/countries: supported countries with postal
+     *  and location rules. Public. */
+    internationalCountries(): Promise<unknown>;
+    /** POST /api/v1/international/quote: gw's international freight-quote body
+     *  in, its options out. Priced live with the forwarder, often near a minute. */
+    internationalQuote(body: Record<string, unknown>): Promise<unknown>;
+    /** POST /api/v1/international/book: gw's /freights/book body. Not
+     *  idempotent and not cancellable through the API, so a timeout is
+     *  reported as unknown rather than retried. */
+    internationalBook(body: Record<string, unknown>): Promise<unknown>;
+    /** GET or PUT /api/v1/international/orders/{id}/customs: read, or merge
+     *  fields into, an international order's customs data. */
+    internationalCustoms(orderId: string, update?: Record<string, unknown>): Promise<unknown>;
     listBookings(limit?: number): Promise<unknown>;
     track(shipmentId: string): Promise<unknown>;
     cancel(params: Record<string, unknown>): Promise<unknown>;

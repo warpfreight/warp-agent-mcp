@@ -36,6 +36,9 @@ export class BookingPendingError extends Error {
  *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
  *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
 export const BOOK_TIMEOUT_MS = Number(process.env.WARP_BOOK_TIMEOUT_MS) || 50_000;
+/** International quote and book calls price live with the forwarder; the
+ *  warp-site routes allow 120s, so stop just inside that. */
+const INTL_TIMEOUT_MS = Number(process.env.WARP_INTL_TIMEOUT_MS) || 118_000;
 const CLIENT_VERSION = PACKAGE_VERSION;
 // Distinctive UA so MCP traffic is self-identifying server-side (attribution).
 // Exported so the tool-layer fetches (login/apikey/quote-log/version/me) send it too.
@@ -777,6 +780,41 @@ export class WarpClient {
         }
         logBook({ outcome: "booked", status: res.status, replay: j.idempotent_replay === true, booking: j.booking_id ?? null });
         return json;
+    }
+    /** GET /api/v1/international/settings: whether Air / Ocean is enabled on
+     *  the account and which door services it offers. Key required. */
+    internationalSettings() {
+        return this._selfServe("GET", "/api/v1/international/settings");
+    }
+    /** GET /api/v1/international/countries: supported countries with postal
+     *  and location rules. Public. */
+    internationalCountries() {
+        return this._selfServe("GET", "/api/v1/international/countries");
+    }
+    /** POST /api/v1/international/quote: gw's international freight-quote body
+     *  in, its options out. Priced live with the forwarder, often near a minute. */
+    internationalQuote(body) {
+        return this._selfServe("POST", "/api/v1/international/quote", { body, timeoutMs: INTL_TIMEOUT_MS });
+    }
+    /** POST /api/v1/international/book: gw's /freights/book body. Not
+     *  idempotent and not cancellable through the API, so a timeout is
+     *  reported as unknown rather than retried. */
+    async internationalBook(body) {
+        try {
+            return await this._selfServe("POST", "/api/v1/international/book", { body, timeoutMs: INTL_TIMEOUT_MS });
+        }
+        catch (err) {
+            const name = err?.name;
+            if (name === "TimeoutError" || name === "AbortError")
+                throw new BookingPendingError(String(body.quoteId ?? ""), "timeout");
+            throw err;
+        }
+    }
+    /** GET or PUT /api/v1/international/orders/{id}/customs: read, or merge
+     *  fields into, an international order's customs data. */
+    internationalCustoms(orderId, update) {
+        const path = `/api/v1/international/orders/${encodeURIComponent(orderId)}/customs`;
+        return update ? this._selfServe("PUT", path, { body: update }) : this._selfServe("GET", path);
     }
     // ── Shipments list (auth) ─────────────────────────────────────
     listBookings(limit) {

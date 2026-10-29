@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.23.0 - International (Air / Ocean)
+
+- `international_quote`: air and ocean rates for lanes with at least one end
+  outside the US / Canada (`POST /api/v1/international/quote`). Options come
+  back cheapest first with mode, service, door service, transit days, ports
+  and validity. Sends progress notifications while the forwarder prices.
+- `international_book`: books the chosen option
+  (`POST /api/v1/international/book`), with `port_charges_acknowledged` for
+  door-to-port and port-to-door options. A slow booking is reported as unknown
+  and is not retried, since international bookings cannot be cancelled.
+- `international_customs`: read or merge customs data on a booked order.
+- `international_settings`: account enablement and per-country rules.
+- Server instructions and the workflow rules name `international_book` as a
+  booking tool that needs explicit user confirmation.
+- server.json version realigned with package.json.
+
 ## 0.22.0 — FedEx parcel
 
 - `parcel_quote`: FedEx rates for small packages on US lanes through Warp's

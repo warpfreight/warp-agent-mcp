@@ -1599,6 +1599,255 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
+  // ── 5a-2. international (Air / Ocean, through gw) ───────────
+  // warp-site /api/v1/international/* passes gw's international API through
+  // with the caller's key. Option carriers are the forwarder's co-loaders and
+  // airlines, so they are shown as Warp, like any non-common carrier.
+  const intlPlaceSchema = z.object({
+    country: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO 3166-1 alpha-2 country code, e.g. US, CN, DE"),
+    zipcode: z.string().optional().describe("Postal code. Required where the country uses one (see international_settings)."),
+    city: z.string().optional().describe("City. Needed outside the US / Canada."),
+    state: z.string().optional().describe("State / province / region"),
+    street: z.string().optional().describe("Street address"),
+    latitude: z.number().optional().describe("Latitude, improves pricing outside the US / Canada"),
+    longitude: z.number().optional().describe("Longitude"),
+  });
+
+  const intlItemSchema = z.object({
+    name: z.string().describe("What it is, e.g. 'Machine parts'"),
+    quantity: z.number().int().min(1).describe("Number of identical pallets / pieces in this line"),
+    length_in: z.number().positive().describe("Length of ONE unit, inches"),
+    width_in: z.number().positive().describe("Width of ONE unit, inches"),
+    height_in: z.number().positive().describe("Height of ONE unit, inches"),
+    weight_lbs_per_unit: z.number().positive().describe("Weight of ONE unit, lb"),
+    stackable: z.boolean().optional().describe("Whether units can be stacked. Defaults to false."),
+  });
+
+  type IntlPlace = z.infer<typeof intlPlaceSchema>;
+  type IntlItem = z.infer<typeof intlItemSchema>;
+
+  const intlAddress = (p: IntlPlace) => {
+    const out: Record<string, unknown> = { country: p.country.toUpperCase() };
+    for (const k of ["zipcode", "city", "state", "street", "latitude", "longitude"] as const) {
+      if (p[k] !== undefined) out[k] = p[k];
+    }
+    return out;
+  };
+
+  const intlItems = (items: IntlItem[]) => items.map((i) => ({
+    name: i.name,
+    length: i.length_in,
+    width: i.width_in,
+    height: i.height_in,
+    sizeUnit: "IN",
+    totalWeight: i.quantity * i.weight_lbs_per_unit,
+    weightUnit: "lbs",
+    quantity: i.quantity,
+    stackable: i.stackable ?? false,
+  }));
+
+  const placeLabel = (p: IntlPlace) => [p.country.toUpperCase(), p.zipcode].filter(Boolean).join(" ");
+
+  tool(
+    "international_settings",
+    "Whether international (Air / Ocean) shipping is enabled on the user's Warp account, which door services it offers, and the rules for a destination or origin country (postal code required or not, how locations are given). Pass country to get that country's rules; omit it for the account settings and the list of blocked countries. Requires a signed-in Warp account.",
+    {
+      country: z.string().regex(/^[A-Za-z]{2}$/).optional().describe("ISO alpha-2 code of the country to look up"),
+    },
+    { title: "International Settings", readOnlyHint: true },
+    async (params) => {
+      try {
+        if (!WARP_API_KEY()) {
+          return { content: [{ type: "text", text: "International shipping needs a Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+        }
+        const [settings, countries] = await Promise.all([client.internationalSettings(), client.internationalCountries()]);
+        const list = (countries as { data?: Record<string, unknown> } | null)?.data ?? (countries as Record<string, unknown>);
+        const all = Array.isArray(list?.countries) ? (list.countries as Array<Record<string, unknown>>) : [];
+        const out: Record<string, unknown> = {
+          settings,
+          supported_countries: all.length,
+          blocked_countries: list?.denylist ?? [],
+        };
+        if (params.country) {
+          const code = params.country.toUpperCase();
+          out.country = all.find((c) => c.code === code) ?? `${code} is not a supported country.`;
+        }
+        return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
+  tool(
+    "international_quote",
+    "Air and ocean freight rates for a shipment with at least one end outside the US / Canada (import or export). Returns every option: mode (AIR / OCEAN), service (e.g. STANDARD, LCL), door service (door_to_door, door_to_port, port_to_door), price, transit days, ports and how long the rate is valid. door_to_port and port_to_door prices do NOT include charges at the far port; tell the user that plainly, and the user must accept those charges before booking. Pricing runs live and can take up to a minute. For domestic US freight use compare_modes or ltl_quote instead. Book the user's chosen option with international_book. Requires a signed-in Warp account.",
+    {
+      pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("YYYY-MM-DD"),
+      origin: intlPlaceSchema.describe("Pickup location"),
+      destination: intlPlaceSchema.describe("Delivery location"),
+      items: z.array(intlItemSchema).min(1).max(50).describe("One entry per group of identical pallets / pieces"),
+    },
+    { title: "Get International Rates (Air / Ocean)", readOnlyHint: true },
+    async (params, extra) => {
+      const start = Date.now();
+      const progressToken = extra?._meta?.progressToken;
+      let ticks = 0;
+      const heartbeat = progressToken !== undefined
+        ? setInterval(() => {
+            ticks += 1;
+            extra.sendNotification({ method: "notifications/progress", params: { progressToken, progress: ticks, message: "Pricing with the forwarder" } }).catch(() => {});
+          }, 10_000)
+        : undefined;
+      try {
+        if (!WARP_API_KEY()) {
+          return { content: [{ type: "text", text: "International rates need a Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+        }
+        const data = await client.internationalQuote({
+          pickupDate: params.pickup_date,
+          pickupInfo: intlAddress(params.origin),
+          deliveryInfo: intlAddress(params.destination),
+          items: intlItems(params.items),
+          shipmentType: "LTL",
+        }) as Record<string, unknown>;
+        const raw = Array.isArray(data.options) ? (data.options as Array<Record<string, unknown>>) : [];
+        const options = raw
+          .map((o) => {
+            const intl = (o.international ?? {}) as Record<string, unknown>;
+            const transitMs = typeof o.transitTime === "number" ? o.transitTime : undefined;
+            return {
+              option_id: o.id,
+              carrier: "Warp",
+              mode: intl.mode,
+              service: intl.modeDetail,
+              door_service: intl.doorService,
+              price_usd: o.rate,
+              currency: o.currency,
+              transit_days: transitMs !== undefined ? Math.round(transitMs / 86_400_000) : undefined,
+              origin_port: intl.originPort ?? intl.originAirport,
+              destination_port: intl.destinationPort ?? intl.destinationAirport,
+              destination_charges_included: intl.destinationChargesIncluded,
+              port_charges_acknowledgement_required: intl.portChargesAcknowledgementRequired === true,
+              valid_until: intl.validUntil,
+            };
+          })
+          .sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
+        for (const o of options) {
+          if (typeof o.option_id === "string" && typeof o.price_usd === "number") quoteAmountCache.set(o.option_id, o.price_usd);
+        }
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'quote', tool_name: 'warp_international_quote', mode: 'international', success: true, origin_zip: placeLabel(params.origin), dest_zip: placeLabel(params.destination), duration_ms: Date.now() - start });
+        const guidance = options.length
+          ? "Show every option with mode, service, door service, price, transit days and valid_until. For options with port_charges_acknowledgement_required, say the price stops at the port and charges there are extra. Book only after the user picks one, with international_book and that option_id."
+          : "No international rate came back for this lane. Check the countries and postal codes with international_settings, or try again with a later pickup date.";
+        return { content: [{ type: "text", text: `${JSON.stringify({ quote_id: data.id, options }, null, 2)}\n\n${guidance}` }] };
+      } catch (err) {
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_international_quote', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      } finally {
+        if (heartbeat) clearInterval(heartbeat);
+      }
+    },
+  );
+
+  const intlStopSchema = z.object({
+    company: z.string().optional().describe("Company / location name"),
+    contact_name: z.string().describe("Contact full name"),
+    phone: z.string().describe("Contact phone with country code, e.g. +862150000000"),
+    email: z.string().optional().describe("Contact email"),
+    street: z.string().describe("Street address"),
+    city: z.string().describe("City"),
+    state: z.string().optional().describe("State / province / region"),
+    zipcode: z.string().optional().describe("Postal code; must match the quote"),
+    country: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO alpha-2 country code; must match the quote"),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    window: z.object({ from: z.string(), to: z.string() }).optional().describe("Time window as ISO 8601 UTC timestamps"),
+    ref_nums: z.array(z.string()).optional().describe("References for this stop (PO / SO)"),
+  });
+
+  const intlStop = (s: z.infer<typeof intlStopSchema>) => ({
+    ...(s.company ? { locationName: s.company } : {}),
+    contactName: s.contact_name,
+    contactPhone: s.phone,
+    ...(s.email ? { contactEmail: s.email } : {}),
+    address: intlAddress({ country: s.country, zipcode: s.zipcode, city: s.city, state: s.state, street: s.street, latitude: s.latitude, longitude: s.longitude }),
+    ...(s.window ? { timeWindow: s.window } : {}),
+    ...(s.ref_nums?.length ? { refNums: s.ref_nums } : {}),
+  });
+
+  tool(
+    "international_book",
+    "Book an air or ocean option from international_quote. Requires the option_id the user chose, full pickup and delivery addresses with contact name and phone, and the same items that were quoted. For door_to_port and port_to_door options, set port_charges_acknowledged only after the user has accepted that charges at the far port are extra. Customs data can be sent now in international_info or added later with international_customs. An international booking cannot be cancelled through the API, so only call after the user explicitly confirms this option and price. Payment follows the account (terms, balance or card); if a payment_link comes back, the order is held until the user pays there. Auth required.",
+    {
+      option_id: z.string().describe("option_id the user chose, from your MOST RECENT international_quote"),
+      pickup: intlStopSchema.describe("Pickup address and contact"),
+      delivery: intlStopSchema.describe("Delivery address and contact"),
+      items: z.array(intlItemSchema).min(1).max(50).describe("The items exactly as quoted"),
+      port_charges_acknowledged: z.boolean().optional().describe("true once the user accepts far-port charges (door_to_port / port_to_door only)"),
+      international_info: z.record(z.unknown()).optional().describe("Optional customs data in gw's internationalInfo shape (incoterm, shipper, consignee, commodities, ...)"),
+    },
+    { title: "Book International (Air / Ocean)", destructiveHint: true },
+    async (params) => {
+      const start = Date.now();
+      try {
+        if (!WARP_API_KEY()) {
+          return { content: [{ type: "text", text: "Booking requires your own Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+        }
+        const info: Record<string, unknown> = { ...(params.international_info ?? {}) };
+        if (params.port_charges_acknowledged !== undefined) info.portChargesAcknowledged = params.port_charges_acknowledged;
+        const body: Record<string, unknown> = {
+          quoteId: params.option_id,
+          pickupInfo: intlStop(params.pickup),
+          deliveryInfo: intlStop(params.delivery),
+          items: intlItems(params.items),
+          ...(Object.keys(info).length ? { internationalInfo: info } : {}),
+        };
+        let data: Record<string, unknown>;
+        try {
+          data = await client.internationalBook(body) as Record<string, unknown>;
+        } catch (bookErr) {
+          if (bookErr instanceof BookingPendingError) {
+            return { content: [{ type: "text", text: [
+              `BOOKING OUTCOME UNKNOWN (not failed). Option ${params.option_id} was still booking when this call returned.`,
+              `Do NOT book it again: international bookings are not de-duplicated and cannot be cancelled through the API.`,
+              `Next step: wait a minute, then call list_bookings and look for the new order before doing anything else.`,
+            ].join("\n") }] };
+          }
+          throw bookErr;
+        }
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'book', tool_name: 'warp_international_book', mode: 'international', success: true, quote_id: params.option_id, amount_usd: quoteAmountCache.get(params.option_id), tracking_number: data.trackingNumber as string | undefined, order_id: data.orderId as string | undefined, dest_zip: [params.delivery.country.toUpperCase(), params.delivery.zipcode].filter(Boolean).join(" "), duration_ms: Date.now() - start });
+        const note = typeof data.paymentLink === "string"
+          ? `The order is held until it is paid. Give the user this payment link: ${data.paymentLink}`
+          : "Booked. Track it with track using the trackingNumber; add or correct customs data with international_customs.";
+        return { content: [{ type: "text", text: `${JSON.stringify(data, null, 2)}\n\n${note}` }] };
+      } catch (err) {
+        trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'error', tool_name: 'warp_international_book', success: false, error_message: errText(err), duration_ms: Date.now() - start });
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
+  tool(
+    "international_customs",
+    "Read, or add to, the customs data on a booked international order: incoterm, shipper / consignee, importer or exporter of record, commodities (HS / HTS / Schedule B codes, values, country of origin), ITN, ISF. Omit update to read what is saved. Pass update to merge those fields in; the forwarder is notified, invalid optional values come back in warnings, and sanctioned parties are rejected. Auth required.",
+    {
+      order_id: z.string().describe("Order id or order number (P-xxxxx-xxxx)"),
+      update: z.record(z.unknown()).optional().describe("Fields to merge, in gw's internationalInfo shape"),
+    },
+    { title: "International Customs Data", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    async (params) => {
+      try {
+        if (!WARP_API_KEY()) {
+          return { content: [{ type: "text", text: "Customs data needs a signed-in Warp account. Run 'warp-agent login'." }], isError: true };
+        }
+        const data = await client.internationalCustoms(params.order_id, params.update);
+        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
   // ── 5b. batch_book ─────────────────────────────────────────
   // Book N already-quoted lanes in ONE tool call so a full spreadsheet of
   // priced lanes books as a single progress card instead of N noisy per-row

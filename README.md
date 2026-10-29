@@ -49,6 +49,10 @@ Tools that let an AI agent talk to your Warp account:
 | `batch_book` | Book many already-quoted lanes in one call |
 | `parcel_quote` | FedEx parcel rates for small packages (US): every service level and pickup type |
 | `parcel_book` | Book a FedEx parcel option from `parcel_quote` |
+| `international_settings` | Whether Air / Ocean is enabled on the account, plus a country's postal and location rules |
+| `international_quote` | Air and ocean rates for lanes with an end outside the US / Canada |
+| `international_book` | Book an air or ocean option from `international_quote` |
+| `international_customs` | Read or add customs data on a booked international order |
 | `multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
 | `multistop_book` | Book a quoted multi-stop route as per-leg shipments |
 | `track` | Track a shipment by id or order id |

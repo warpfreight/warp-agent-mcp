@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "Freight quoting, mode and carrier comparison, shipment booking, tracking, documents, invoices, and operator review workflows through the Warp API. Use freight_workflow for shipment-intake, weekly-review, and invoice-review guidance. Use compare_freight_costs for evidence-labeled cost comparisons. Quote availability depends on lane and load. Booking creates real shipments and may incur charges; obtain explicit user confirmation. Account-specific operations require authentication.",
   "author": {
@@ -91,6 +91,22 @@
     {
       "name": "parcel_book",
       "description": "Book a FedEx parcel option from parcel_quote. Requires the quote_id the user chose and the full delivery address with contact name and phone; pickup can be omitted only when a default shipper is saved. ZIPs must match the quote. The packages are the ones quoted (not resent). Charges the account like book does (terms accounts are billed on terms; others pay from the Warp balance, with the saved card covering any shortfall). Only call after the user explicitly confirms this option and price. Auth required."
+    },
+    {
+      "name": "international_settings",
+      "description": "Whether international (Air / Ocean) shipping is enabled on the user's Warp account, which door services it offers, and the rules for a destination or origin country (postal code required or not, how locations are given). Pass country to get that country's rules; omit it for the account settings and the list of blocked countries. Requires a signed-in Warp account."
+    },
+    {
+      "name": "international_quote",
+      "description": "Air and ocean freight rates for a shipment with at least one end outside the US / Canada (import or export). Returns every option: mode (AIR / OCEAN), service (e.g. STANDARD, LCL), door service (door_to_door, door_to_port, port_to_door), price, transit days, ports and how long the rate is valid. door_to_port and port_to_door prices do NOT include charges at the far port; tell the user that plainly, and the user must accept those charges before booking. Pricing runs live and can take up to a minute. For domestic US freight use compare_modes or ltl_quote instead. Book the user's chosen option with international_book. Requires a signed-in Warp account."
+    },
+    {
+      "name": "international_book",
+      "description": "Book an air or ocean option from international_quote. Requires the option_id the user chose, full pickup and delivery addresses with contact name and phone, and the same items that were quoted. For door_to_port and port_to_door options, set port_charges_acknowledged only after the user has accepted that charges at the far port are extra. Customs data can be sent now in international_info or added later with international_customs. An international booking cannot be cancelled through the API, so only call after the user explicitly confirms this option and price. Payment follows the account (terms, balance or card); if a payment_link comes back, the order is held until the user pays there. Auth required."
+    },
+    {
+      "name": "international_customs",
+      "description": "Read, or add to, the customs data on a booked international order: incoterm, shipper / consignee, importer or exporter of record, commodities (HS / HTS / Schedule B codes, values, country of origin), ITN, ISF. Omit update to read what is saved. Pass update to merge those fields in; the forwarder is notified, invalid optional values come back in warnings, and sanctioned parties are rejected. Auth required."
     },
     {
       "name": "batch_book",
