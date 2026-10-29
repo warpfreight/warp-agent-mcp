@@ -1257,7 +1257,7 @@ export function registerTools(server, client, getApiKey) {
         }).optional().describe("Pickup/delivery accessorial services. Should match the accessorials used when quoting."),
         pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Pickup time window, 24h HH:MM, e.g. { from: '08:00', to: '17:00' }. Defaults to a full business day if omitted."),
         delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Delivery time window, 24h HH:MM, e.g. { from: '09:00', to: '12:00' }. Defaults to a full business day if omitted."),
-    }, { title: "Book Shipment", destructiveHint: true }, async (params) => {
+    }, { title: "Book Shipment", readOnlyHint: false, destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             // No session-cache precondition on purpose. /api/v1/book resolves the
@@ -1437,7 +1437,7 @@ export function registerTools(server, client, getApiKey) {
         reference: z.string().optional().describe("Your reference (PO, order number)"),
         pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local pickup window, 24h HH:MM. Defaults to 08:00-20:00."),
         delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local delivery window, 24h HH:MM. Defaults to 08:00-20:00."),
-    }, { title: "Book Parcel (FedEx)", destructiveHint: true }, async (params) => {
+    }, { title: "Book Parcel (FedEx)", readOnlyHint: false, destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             if (!WARP_API_KEY()) {
@@ -1527,7 +1527,7 @@ export function registerTools(server, client, getApiKey) {
         }).optional(),
         shared_pickup_window: z.object({ from: z.string(), to: z.string() }).optional(),
         shared_delivery_window: z.object({ from: z.string(), to: z.string() }).optional(),
-    }, { title: "Batch Book Shipments", destructiveHint: true }, async (params) => {
+    }, { title: "Batch Book Shipments", readOnlyHint: false, destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             const apiKey = WARP_API_KEY();
@@ -1783,7 +1783,7 @@ export function registerTools(server, client, getApiKey) {
             delivery_info: multistopStopSchema.describe("Where this leg's freight gets dropped"),
             list_items: z.array(multistopLegItemSchema).min(1).describe("Freight riding this leg"),
         })).min(2).max(20).describe("One leg per pickup→delivery pair (the gateway requires at least 2)"),
-    }, { title: "Book Multi-stop FTL", destructiveHint: true }, async (params) => {
+    }, { title: "Book Multi-stop FTL", readOnlyHint: false, destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             const apiKey = WARP_API_KEY();
@@ -2442,8 +2442,9 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── report_issue ─────────────────────────────────────────
-    // Warp-side identifier shape accepted by /api/mcp/feedback (IDENT there).
-    const reportId = z.string().max(120).regex(/^[A-Za-z0-9._:\-]+$/, "letters, digits, dots, colons, hyphens or underscores only");
+    // Warp-side identifier shape accepted by /api/mcp/feedback (IDENT there). A fresh schema per
+    // field: a shared instance is emitted as a $ref, which leaves the later fields without a type.
+    const reportId = () => z.string().max(120).regex(/^[A-Za-z0-9._:\-]+$/, "letters, digits, dots, colons, hyphens or underscores only");
     tool("report_issue", "Report a problem with Warp's tools to the Warp team. Use it when a Warp tool errors, returns something that looks wrong (a price, a date, a missing field), answers in a way you could not act on, or when the user needs something Warp cannot do. " +
         "Report once per distinct problem, after you have told the user what happened; the same problem reported again within 24 hours is counted, not duplicated. " +
         "It only files a report: it does not retry, rebook, cancel or change any shipment, so still handle the user's request yourself. " +
@@ -2455,9 +2456,9 @@ export function registerTools(server, client, getApiKey) {
         expected_behavior: z.string().min(1).max(2000).describe("What you or the user expected to happen"),
         observed_behavior: z.string().min(1).max(2000).describe("What actually happened, including any error code or message returned"),
         customer_blocked: z.boolean().describe("true if the user could not finish what they were trying to do"),
-        quote_id: reportId.optional().describe("Quote ID involved, if any"),
-        shipment_id: reportId.optional().describe("Shipment ID involved, if any"),
-        request_id: reportId.optional().describe("Request ID from an error response, if any"),
+        quote_id: reportId().optional().describe("Quote ID involved, if any"),
+        shipment_id: reportId().optional().describe("Shipment ID involved, if any"),
+        request_id: reportId().optional().describe("Request ID from an error response, if any"),
         error_code: z.string().max(64).regex(/^[A-Za-z0-9._:\-]+$/).optional().describe("Error code returned by the tool, e.g. UPSTREAM_ERROR"),
         occurred_at: z.string().optional().describe("When it happened, ISO 8601. Defaults to now."),
     }, { title: "Report a Problem to Warp", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }, async (params) => {
@@ -2645,7 +2646,7 @@ export function registerTools(server, client, getApiKey) {
     // ── delete_load_template ──────────────────────────────
     tool("delete_load_template", "Delete a saved load template by its id (starts with lt_). Auth required.", {
         load_template_id: z.string().describe("Template id to delete (starts with lt_)"),
-    }, { title: "Delete Load Template", destructiveHint: true }, async (params) => {
+    }, { title: "Delete Load Template", readOnlyHint: false, destructiveHint: true }, async (params) => {
         try {
             await client.deleteLoadTemplate(params.load_template_id);
             return { content: [{ type: "text", text: `Deleted load template ${params.load_template_id}.` }] };

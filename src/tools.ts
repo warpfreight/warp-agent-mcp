@@ -1360,7 +1360,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Pickup time window, 24h HH:MM, e.g. { from: '08:00', to: '17:00' }. Defaults to a full business day if omitted."),
       delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Delivery time window, 24h HH:MM, e.g. { from: '09:00', to: '12:00' }. Defaults to a full business day if omitted."),
     },
-    { title: "Book Shipment", destructiveHint: true },
+    { title: "Book Shipment", readOnlyHint: false, destructiveHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -1557,7 +1557,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local pickup window, 24h HH:MM. Defaults to 08:00-20:00."),
       delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local delivery window, 24h HH:MM. Defaults to 08:00-20:00."),
     },
-    { title: "Book Parcel (FedEx)", destructiveHint: true },
+    { title: "Book Parcel (FedEx)", readOnlyHint: false, destructiveHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -1654,7 +1654,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       shared_pickup_window:   z.object({ from: z.string(), to: z.string() }).optional(),
       shared_delivery_window: z.object({ from: z.string(), to: z.string() }).optional(),
     },
-    { title: "Batch Book Shipments", destructiveHint: true },
+    { title: "Batch Book Shipments", readOnlyHint: false, destructiveHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -1938,7 +1938,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
         list_items: z.array(multistopLegItemSchema).min(1).describe("Freight riding this leg"),
       })).min(2).max(20).describe("One leg per pickup→delivery pair (the gateway requires at least 2)"),
     },
-    { title: "Book Multi-stop FTL", destructiveHint: true },
+    { title: "Book Multi-stop FTL", readOnlyHint: false, destructiveHint: true },
     async (params) => {
       const start = Date.now();
       try {
@@ -2704,8 +2704,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
 
   // ── report_issue ─────────────────────────────────────────
 
-  // Warp-side identifier shape accepted by /api/mcp/feedback (IDENT there).
-  const reportId = z.string().max(120).regex(/^[A-Za-z0-9._:\-]+$/, "letters, digits, dots, colons, hyphens or underscores only");
+  // Warp-side identifier shape accepted by /api/mcp/feedback (IDENT there). A fresh schema per
+  // field: a shared instance is emitted as a $ref, which leaves the later fields without a type.
+  const reportId = () => z.string().max(120).regex(/^[A-Za-z0-9._:\-]+$/, "letters, digits, dots, colons, hyphens or underscores only");
 
   tool(
     "report_issue",
@@ -2721,9 +2722,9 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
       expected_behavior: z.string().min(1).max(2000).describe("What you or the user expected to happen"),
       observed_behavior: z.string().min(1).max(2000).describe("What actually happened, including any error code or message returned"),
       customer_blocked: z.boolean().describe("true if the user could not finish what they were trying to do"),
-      quote_id: reportId.optional().describe("Quote ID involved, if any"),
-      shipment_id: reportId.optional().describe("Shipment ID involved, if any"),
-      request_id: reportId.optional().describe("Request ID from an error response, if any"),
+      quote_id: reportId().optional().describe("Quote ID involved, if any"),
+      shipment_id: reportId().optional().describe("Shipment ID involved, if any"),
+      request_id: reportId().optional().describe("Request ID from an error response, if any"),
       error_code: z.string().max(64).regex(/^[A-Za-z0-9._:\-]+$/).optional().describe("Error code returned by the tool, e.g. UPSTREAM_ERROR"),
       occurred_at: z.string().optional().describe("When it happened, ISO 8601. Defaults to now."),
     },
@@ -2950,7 +2951,7 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     {
       load_template_id: z.string().describe("Template id to delete (starts with lt_)"),
     },
-    { title: "Delete Load Template", destructiveHint: true },
+    { title: "Delete Load Template", readOnlyHint: false, destructiveHint: true },
     async (params) => {
       try {
         await client.deleteLoadTemplate(params.load_template_id);
