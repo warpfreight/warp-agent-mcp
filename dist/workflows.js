@@ -73,13 +73,13 @@ export function registerWorkflows(server) {
         title: "Start a Freight Review",
         description: "Get a ready-to-use shipment intake CSV header, results CSV header, and starter prompt for shipment quoting, weekly freight comparison, or invoice review. Guidance only: does not read files, fetch rates, schedule work, or book. Use this when an operator asks how to start or supplies invoices/a shipment sheet.",
         inputSchema: { workflow: z.enum(["shipment_intake", "weekly_freight_review", "invoice_review"]) },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        annotations: { title: "Start a Freight Review", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     }, async ({ workflow }) => ({ content: [{ type: "text", text: JSON.stringify({ workflow, starter_prompt: workflows[workflow], intake_csv_header: intake, results_csv_header: results, rules, instructions: "One row per shipment, up to 50. Use YYYY-MM-DD dates and text ZIP codes. The host assistant reads the upload and creates the results file; these headers are not an Excel integration. Baseline fields are optional for quoting, required for a cost comparison. Use existing quote tool schemas for supported accessorial values." }, null, 2) }] }));
     server.registerTool("compare_freight_costs", {
         title: "Compare Freight Costs Against Evidence",
         description: "Calculate USD cost differences for up to 50 distinct shipments using supplied invoice/quote amounts and explicit comparability evidence. Excludes mismatched or unknown terms, keeps losses, separates quoted opportunities from invoice differences. Does not fetch rates, verify documents, annualize savings, or book. One candidate per shipment per call.",
         inputSchema: { rows: z.array(comparisonRow).min(1).max(50) },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        annotations: { title: "Compare Freight Costs Against Evidence", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     }, async (input) => {
         try {
             return { content: [{ type: "text", text: JSON.stringify(compareFreightCosts(input), null, 2) }] };
