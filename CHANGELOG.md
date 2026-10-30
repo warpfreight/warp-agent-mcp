@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.1
+
+- `international_quote`: transit days were always 0. gw's `transitTime` is in
+  seconds, not milliseconds.
+- `international_settings`: reads the country list from `list_data`, so the
+  supported-country count and per-country rules come back.
+
 ## 0.23.0 - International (Air / Ocean)
 
 - `international_quote`: air and ocean rates for lanes with at least one end

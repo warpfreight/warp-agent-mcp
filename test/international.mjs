@@ -47,11 +47,13 @@ const stubClient = {
   internationalQuote: async (b) => {
     calls.push(["quote", b]);
     return { id: "01Q", options: [
-      { id: "01AIR", carrierName: "Delta Airlines", source: "exfreight", rate: 914.2, currency: "USD", transitTime: 691200000, international: { mode: "AIR", modeDetail: "STANDARD", doorService: "door_to_port", portChargesAcknowledgementRequired: true, originAirport: "LAX", destinationAirport: "PVG" } },
-      { id: "01SEA", carrierName: "Craft Multi LCL", source: "exfreight", rate: 243.89, currency: "USD", transitTime: 3715200000, international: { mode: "OCEAN", modeDetail: "LCL", doorService: "door_to_door", portChargesAcknowledgementRequired: false, originPort: "USLAX", destinationPort: "CNSGH" } },
+      { id: "01AIR", carrierName: "Delta Airlines", source: "exfreight", rate: 914.2, currency: "USD", transitTime: 691200, international: { mode: "AIR", modeDetail: "STANDARD", doorService: "door_to_port", portChargesAcknowledgementRequired: true, originAirport: "LAX", destinationAirport: "PVG" } },
+      { id: "01SEA", carrierName: "Craft Multi LCL", source: "exfreight", rate: 243.89, currency: "USD", transitTime: 3715200, international: { mode: "OCEAN", modeDetail: "LCL", doorService: "door_to_door", portChargesAcknowledgementRequired: false, originPort: "USLAX", destinationPort: "CNSGH" } },
     ] };
   },
   internationalBook: async (b) => { calls.push(["book", b]); return bookResult(); },
+  internationalSettings: async () => ({ internationalEnabled: true, doorServices: ["door_to_door"] }),
+  internationalCountries: async () => ({ message: "Success", data: { list_data: [{ code: "CN", name: "China", postalRequired: false }], total: 1, denylist: ["CU"] } }),
 };
 const origin = { country: "us", zipcode: "90021" };
 const destination = { country: "CN", zipcode: "200120", city: "Shanghai" };
@@ -73,7 +75,13 @@ assert.equal(quoteBody.items[0].totalWeight, 800, "totalWeight is quantity x per
 assert.equal(quoteBody.items[0].stackable, false);
 const shown = JSON.parse(q.content[0].text.split("\n\n")[0]);
 assert.deepEqual(shown.options.map((o) => o.option_id), ["01SEA", "01AIR"], "cheapest first");
-assert.equal(shown.options[1].transit_days, 8);
+assert.equal(shown.options[1].transit_days, 8, "gw transitTime is seconds");
+assert.equal(shown.options[0].transit_days, 43);
+
+const s = JSON.parse((await handlers.get("international_settings")({ country: "cn" })).content[0].text);
+assert.equal(s.supported_countries, 1);
+assert.equal(s.country.name, "China");
+assert.deepEqual(s.blocked_countries, ["CU"]);
 assert.equal(shown.options[1].destination_port, "PVG");
 assert.doesNotMatch(q.content[0].text, /Delta|Craft|exfreight/i, "forwarder carriers and source are not shown");
 assert.ok(shown.options.every((o) => o.carrier === "Warp"));

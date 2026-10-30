@@ -1529,7 +1529,8 @@ export function registerTools(server, client, getApiKey) {
             }
             const [settings, countries] = await Promise.all([client.internationalSettings(), client.internationalCountries()]);
             const list = countries?.data ?? countries;
-            const all = Array.isArray(list?.countries) ? list.countries : [];
+            const rows = list?.list_data ?? list?.countries;
+            const all = Array.isArray(rows) ? rows : [];
             const out = {
                 settings,
                 supported_countries: all.length,
@@ -1575,7 +1576,7 @@ export function registerTools(server, client, getApiKey) {
             const options = raw
                 .map((o) => {
                 const intl = (o.international ?? {});
-                const transitMs = typeof o.transitTime === "number" ? o.transitTime : undefined;
+                const transitSeconds = typeof o.transitTime === "number" ? o.transitTime : undefined;
                 return {
                     option_id: o.id,
                     carrier: "Warp",
@@ -1584,7 +1585,7 @@ export function registerTools(server, client, getApiKey) {
                     door_service: intl.doorService,
                     price_usd: o.rate,
                     currency: o.currency,
-                    transit_days: transitMs !== undefined ? Math.round(transitMs / 86_400_000) : undefined,
+                    transit_days: transitSeconds !== undefined ? Math.round(transitSeconds / 86_400) : undefined,
                     origin_port: intl.originPort ?? intl.originAirport,
                     destination_port: intl.destinationPort ?? intl.destinationAirport,
                     destination_charges_included: intl.destinationChargesIncluded,
