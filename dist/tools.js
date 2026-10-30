@@ -1417,7 +1417,7 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
-    const parcelStopSchema = z.object({
+    const parcelStopSchema = () => z.object({
         zipCode: z.string().regex(/^\d{5}$/).describe("5-digit ZIP; must match the quoted ZIP"),
         city: z.string().describe("City"),
         state: z.string().describe("2-letter state code"),
@@ -1432,8 +1432,8 @@ export function registerTools(server, client, getApiKey) {
     });
     tool("parcel_book", "Book a FedEx parcel option from parcel_quote. Requires the quote_id the user chose and the full delivery address with contact name and phone; pickup can be omitted only when a default shipper is saved. ZIPs must match the quote. The packages are the ones quoted (not resent). Charges the account like book does (terms accounts are billed on terms; others pay from the Warp balance, with the saved card covering any shortfall). Only call after the user explicitly confirms this option and price. Auth required.", {
         quote_id: z.string().describe("quote_id of the option the user chose, from your MOST RECENT parcel_quote"),
-        pickup: parcelStopSchema.optional().describe("Pickup address. Required if no default shipper is saved."),
-        delivery: parcelStopSchema.describe("Delivery address and contact, every required field"),
+        pickup: parcelStopSchema().optional().describe("Pickup address. Required if no default shipper is saved."),
+        delivery: parcelStopSchema().describe("Delivery address and contact, every required field"),
         reference: z.string().optional().describe("Your reference (PO, order number)"),
         pickup_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local pickup window, 24h HH:MM. Defaults to 08:00-20:00."),
         delivery_window: z.object({ from: z.string(), to: z.string() }).optional().describe("Local delivery window, 24h HH:MM. Defaults to 08:00-20:00."),
@@ -1482,7 +1482,7 @@ export function registerTools(server, client, getApiKey) {
     // warp-site /api/v1/international/* passes gw's international API through
     // with the caller's key. Option carriers are the forwarder's co-loaders and
     // airlines, so they are shown as Warp, like any non-common carrier.
-    const intlPlaceSchema = z.object({
+    const intlPlaceSchema = () => z.object({
         country: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO 3166-1 alpha-2 country code, e.g. US, CN, DE"),
         zipcode: z.string().optional().describe("Postal code. Required where the country uses one (see international_settings)."),
         city: z.string().optional().describe("City. Needed outside the US / Canada."),
@@ -1491,7 +1491,7 @@ export function registerTools(server, client, getApiKey) {
         latitude: z.number().optional().describe("Latitude, improves pricing outside the US / Canada"),
         longitude: z.number().optional().describe("Longitude"),
     });
-    const intlItemSchema = z.object({
+    const intlItemSchema = () => z.object({
         name: z.string().describe("What it is, e.g. 'Machine parts'"),
         quantity: z.number().int().min(1).describe("Number of identical pallets / pieces in this line"),
         length_in: z.number().positive().describe("Length of ONE unit, inches"),
@@ -1500,6 +1500,36 @@ export function registerTools(server, client, getApiKey) {
         weight_lbs_per_unit: z.number().positive().describe("Weight of ONE unit, lb"),
         stackable: z.boolean().optional().describe("Whether units can be stacked. Defaults to false."),
     });
+    const intlContainerSchema = () => z.object({
+        size: z.enum(["20'DV", "40'DV", "40'HC"]).describe("Container size: 20'DV, 40'DV or 40'HC (high cube)"),
+        count: z.number().int().min(1).describe("Number of containers of this size"),
+        commodity: z.string().describe("What is in them, e.g. 'Furniture'"),
+        weight_lbs: z.number().positive().max(67_200).describe("Cargo weight per container, lb (max 67,200)"),
+    });
+    const intlVolumeSchema = () => z.object({
+        total_cubic_ft: z.number().positive().describe("Total volume of the shipment, cubic feet (max ~5,300 / 150 m3)"),
+        max_height_in: z.number().positive().describe("Height of the tallest piece, inches"),
+        total_weight_lbs: z.number().positive().describe("Total weight of the shipment, lb"),
+        pieces: z.number().int().min(1).optional().describe("Number of pieces, if known"),
+        description: z.string().optional().describe("What it is, e.g. 'Furniture'"),
+    });
+    const intlPackaging = (containers, volume) => {
+        if (containers?.length) {
+            return { containers: containers.map((c) => ({ size: c.size, count: c.count, commodity: c.commodity, weight: { value: c.weight_lbs, unit: "lbs" } })) };
+        }
+        if (volume) {
+            return {
+                volumetric: {
+                    totalVolume: { value: volume.total_cubic_ft, unit: "cubic_ft" },
+                    maxHeight: { value: volume.max_height_in, unit: "inch" },
+                    weight: { value: volume.total_weight_lbs, unit: "lbs" },
+                    ...(volume.pieces ? { quantity: volume.pieces } : {}),
+                    ...(volume.description ? { description: volume.description } : {}),
+                },
+            };
+        }
+        return undefined;
+    };
     const intlAddress = (p) => {
         const out = { country: p.country.toUpperCase() };
         for (const k of ["zipcode", "city", "state", "street", "latitude", "longitude"]) {
@@ -1546,11 +1576,13 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
-    tool("international_quote", "Air and ocean freight rates for a shipment with at least one end outside the US / Canada (import or export). Returns every option: mode (AIR / OCEAN), service (e.g. STANDARD, LCL), door service (door_to_door, door_to_port, port_to_door), price, transit days, ports and how long the rate is valid. door_to_port and port_to_door prices do NOT include charges at the far port; tell the user that plainly, and the user must accept those charges before booking. Pricing runs live and can take up to a minute. For domestic US freight use compare_modes or ltl_quote instead. Book the user's chosen option with international_book. Requires a signed-in Warp account.", {
+    tool("international_quote", "Air, ocean and US / Mexico cross-border truck rates for a shipment with at least one end outside the US / Canada (import, export, or between two other countries). Describe the cargo ONE way: items (pallets / pieces with dimensions), containers (ocean full container load: 20'DV, 40'DV, 40'HC), or volume (total cubic feet when piece sizes are unknown). Returns every option: mode (AIR / OCEAN / TRUCK), service (LCL, FCL, STANDARD, EXPRESS, ...), door service (door_to_door, door_to_port, port_to_door), price, transit days, ports and how long the rate is valid. door_to_port and port_to_door prices do NOT include charges at the far port; tell the user that plainly, and the user must accept those charges before booking. Not served: hazardous materials, sanctioned countries, and pickup and delivery in the same non-US country. Pricing runs live and can take up to a minute; if it times out, retry once. For domestic US freight use compare_modes or ltl_quote instead. Book the user's chosen option with international_book. Requires a signed-in Warp account.", {
         pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("YYYY-MM-DD"),
-        origin: intlPlaceSchema.describe("Pickup location"),
-        destination: intlPlaceSchema.describe("Delivery location"),
-        items: z.array(intlItemSchema).min(1).max(50).describe("One entry per group of identical pallets / pieces"),
+        origin: intlPlaceSchema().describe("Pickup location"),
+        destination: intlPlaceSchema().describe("Delivery location"),
+        items: z.array(intlItemSchema()).min(1).max(50).optional().describe("Pallets / pieces, one entry per group of identical units. Use this OR containers OR volume."),
+        containers: z.array(intlContainerSchema()).min(1).max(10).optional().describe("Ocean full container load (FCL), up to 30 containers. Use this OR items OR volume."),
+        volume: intlVolumeSchema().optional().describe("Loose cargo by total volume when piece sizes are unknown. Use this OR items OR containers."),
     }, { title: "Get International Rates (Air / Ocean)", readOnlyHint: true }, async (params, extra) => {
         const start = Date.now();
         const progressToken = extra?._meta?.progressToken;
@@ -1565,11 +1597,16 @@ export function registerTools(server, client, getApiKey) {
             if (!WARP_API_KEY()) {
                 return { content: [{ type: "text", text: "International rates need a Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
             }
+            const cargoKinds = [params.items?.length, params.containers?.length, params.volume].filter(Boolean).length;
+            if (cargoKinds !== 1) {
+                return { content: [{ type: "text", text: "Describe the cargo exactly one way: items (pallets / pieces), containers (ocean FCL) or volume (total cubic feet)." }], isError: true };
+            }
+            const packaging = intlPackaging(params.containers, params.volume);
             const data = await client.internationalQuote({
                 pickupDate: params.pickup_date,
                 pickupInfo: intlAddress(params.origin),
                 deliveryInfo: intlAddress(params.destination),
-                items: intlItems(params.items),
+                ...(packaging ? { packaging } : { items: intlItems(params.items ?? []) }),
                 shipmentType: "LTL",
             });
             const raw = Array.isArray(data.options) ? data.options : [];
@@ -1591,6 +1628,10 @@ export function registerTools(server, client, getApiKey) {
                     destination_charges_included: intl.destinationChargesIncluded,
                     port_charges_acknowledgement_required: intl.portChargesAcknowledgementRequired === true,
                     valid_until: intl.validUntil,
+                    ...(intl.fclContainers ? { containers: intl.fclContainers } : {}),
+                    ...(intl.borderCrossing ? { border_crossing: intl.borderCrossing } : {}),
+                    ...(Array.isArray(intl.schedule) && intl.schedule.length ? { schedule: intl.schedule } : {}),
+                    ...(intl.servicesNotOffered ? { services_not_offered: intl.servicesNotOffered } : {}),
                 };
             })
                 .sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
@@ -1600,7 +1641,7 @@ export function registerTools(server, client, getApiKey) {
             }
             trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'quote', tool_name: 'warp_international_quote', mode: 'international', success: true, origin_zip: placeLabel(params.origin), dest_zip: placeLabel(params.destination), duration_ms: Date.now() - start });
             const guidance = options.length
-                ? "Show every option with mode, service, door service, price, transit days and valid_until. For options with port_charges_acknowledgement_required, say the price stops at the port and charges there are extra. Book only after the user picks one, with international_book and that option_id."
+                ? "Show every option with mode, service, door service, price, transit days and valid_until. For options with port_charges_acknowledgement_required, say the price stops at the port and charges there are extra. For TRUCK options, name the border_crossing. If services_not_offered is present, say which requested services that route does not include. Book only after the user picks one, with international_book and that option_id, before valid_until."
                 : "No international rate came back for this lane. Check the countries and postal codes with international_settings, or try again with a later pickup date.";
             return { content: [{ type: "text", text: `${JSON.stringify({ quote_id: data.id, options }, null, 2)}\n\n${guidance}` }] };
         }
@@ -1613,51 +1654,165 @@ export function registerTools(server, client, getApiKey) {
                 clearInterval(heartbeat);
         }
     });
-    const intlStopSchema = z.object({
+    const intlStopSchema = () => z.object({
         company: z.string().optional().describe("Company / location name"),
         contact_name: z.string().describe("Contact full name"),
         phone: z.string().describe("Contact phone with country code, e.g. +862150000000"),
         email: z.string().optional().describe("Contact email"),
         street: z.string().describe("Street address"),
+        street2: z.string().optional().describe("Suite / unit / building"),
         city: z.string().describe("City"),
-        state: z.string().optional().describe("State / province / region"),
-        zipcode: z.string().optional().describe("Postal code; must match the quote"),
+        state: z.string().describe("2-letter state / province code in the US and Canada; region or province name elsewhere"),
+        zipcode: z.string().optional().describe("Postal code. Required in the US, Canada and countries that use one; must match the quote"),
         country: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO alpha-2 country code; must match the quote"),
         latitude: z.number().optional(),
         longitude: z.number().optional(),
-        window: z.object({ from: z.string(), to: z.string() }).optional().describe("Time window as ISO 8601 UTC timestamps"),
-        ref_nums: z.array(z.string()).optional().describe("References for this stop (PO / SO)"),
+        window: z.object({ from: z.string(), to: z.string() }).describe("Time window as ISO 8601 UTC timestamps. Pickup: when the freight is ready. Delivery: indicative only for international."),
+        instructions: z.string().optional().describe("Dock, access or appointment notes for the driver"),
+        ref_nums: z.array(z.string()).optional().describe("References for this stop (PO, SO, the customer's billing reference)"),
     });
     const intlStop = (s) => ({
         ...(s.company ? { locationName: s.company } : {}),
         contactName: s.contact_name,
         contactPhone: s.phone,
         ...(s.email ? { contactEmail: s.email } : {}),
-        address: intlAddress({ country: s.country, zipcode: s.zipcode, city: s.city, state: s.state, street: s.street, latitude: s.latitude, longitude: s.longitude }),
-        ...(s.window ? { timeWindow: s.window } : {}),
+        address: {
+            ...intlAddress({ country: s.country, zipcode: s.zipcode, city: s.city, state: s.state, street: s.street, latitude: s.latitude, longitude: s.longitude }),
+            ...(s.street2 ? { street2: s.street2 } : {}),
+        },
+        timeWindow: s.window,
+        ...(s.instructions ? { instructions: s.instructions } : {}),
         ...(s.ref_nums?.length ? { refNums: s.ref_nums } : {}),
     });
-    tool("international_book", "Book an air or ocean option from international_quote. Requires the option_id the user chose, full pickup and delivery addresses with contact name and phone, and the same items that were quoted. For door_to_port and port_to_door options, set port_charges_acknowledged only after the user has accepted that charges at the far port are extra. Customs data can be sent now in international_info or added later with international_customs. An international booking cannot be cancelled through the API, so only call after the user explicitly confirms this option and price. Payment follows the account (terms, balance or card); if a payment_link comes back, the order is held until the user pays there. Auth required.", {
+    const recordPartySchema = () => z.object({
+        name: z.string().describe("Company name, Latin characters"),
+        tax_id: z.string().optional().describe("Tax id in the party's country format (US: EIN)"),
+        street: z.string(),
+        street2: z.string().optional(),
+        city: z.string(),
+        state: z.string().optional(),
+        zipcode: z.string().optional().describe("Required where the country uses postal codes"),
+        country: z.string().regex(/^[A-Za-z]{2}$/),
+        contact_name: z.string(),
+        phone: z.string().describe("International format, e.g. +862150000000"),
+        email: z.string().optional(),
+    });
+    const isfPartySchema = () => z.object({
+        name: z.string(),
+        address: z.string().describe("One-line address"),
+        country: z.string().regex(/^[A-Za-z]{2}$/),
+    });
+    const customsSchema = () => z.object({
+        no_hazmat: z.boolean().optional().describe("The shipper confirms nothing is hazardous: no batteries (also inside devices), aerosols, perfume or paint. Ask the user; without it the forwarder asks before moving the freight."),
+        shipper_tax_id: z.string().optional().describe("Shipper tax id. US exports: the EIN (9 digits); if omitted, the EIN on the account's customs profile is used."),
+        consignee_tax_id: z.string().optional().describe("Consignee tax id in its country's format"),
+        importer_of_record_number: z.string().optional().describe("US imports: the consignee's importer of record number (EIN or CBP number YYDDPP-NNNNN)"),
+        customs_bond: z.string().optional().describe("US imports: customs bond number"),
+        importer_registration_number: z.string().optional().describe("Destination importer registration: Brazil CNPJ (14 digits) or CPF (11), Colombia NIT, Argentina CUIT (11 digits), Nigeria Form M (MF + 8-12 digits)"),
+        exporter_of_record: recordPartySchema().optional().describe("Only when someone other than the shipper is the exporter of record"),
+        importer_of_record: recordPartySchema().optional().describe("Only when someone other than the consignee is the importer of record (e.g. the seller or a broker clears import)"),
+        eei_authorization: z.boolean().optional().describe("US exports: the shipper authorizes the forwarder to file the EEI in AES. Needed when any one Schedule B line is over $2,500 or a license is required, unless an ITN is given."),
+        itn: z.string().optional().describe("US exports: the ITN, when the shipper files the EEI itself"),
+        ear99_no_license: z.boolean().optional().describe("US exports: every item is EAR99 and needs no export license"),
+        commodities: z.array(z.object({
+            description: z.string().describe("Plain description of the goods"),
+            schedule_b: z.string().optional().describe("US exports: 10-digit Schedule B code"),
+            hts_code: z.string().optional().describe("US imports: 10-digit HTS code"),
+            hs_code: z.string().optional().describe("No US end (between two other countries): 6-10 digit HS code"),
+            country_of_origin: z.string().regex(/^[A-Za-z]{2}$/).optional().describe("Where the goods were made, ISO alpha-2"),
+            value_usd: z.number().nonnegative().optional().describe("Total value of this line, USD"),
+            quantity: z.number().int().min(1).optional(),
+            weight_lbs: z.number().positive().optional().describe("Total weight of this line, lb"),
+            eccn: z.string().optional().describe("US exports: ECCN; leave empty for EAR99 goods"),
+            license_type: z.string().optional().describe("US exports: license type or exception, e.g. NLR"),
+        })).max(50).optional().describe("One line per kind of goods. A line with description, code, country of origin, value, quantity and weight is complete; anything missing is collected by the forwarder after booking."),
+        isf: z.object({
+            seller: isfPartySchema().optional(),
+            buyer: isfPartySchema().optional(),
+            manufacturer: isfPartySchema().optional(),
+            ship_to: isfPartySchema().optional(),
+            container_stuffing_location: isfPartySchema().optional(),
+            consolidator: isfPartySchema().optional(),
+            importer_of_record_number: z.string().optional(),
+            consignee_number: z.string().optional(),
+        }).optional().describe("Ocean imports into the US only: Importer Security Filing (10+2) parties. The forwarder files it with the customer after booking; country of origin and HTS come from commodities."),
+    });
+    const recordParty = (p) => ({
+        name: p.name,
+        ...(p.tax_id ? { taxId: p.tax_id } : {}),
+        address: {
+            street: p.street,
+            ...(p.street2 ? { street2: p.street2 } : {}),
+            city: p.city,
+            ...(p.state ? { state: p.state } : {}),
+            ...(p.zipcode ? { zipcode: p.zipcode } : {}),
+            countryAlpha2Code: p.country.toUpperCase(),
+        },
+        contact: { name: p.contact_name, phone: p.phone, ...(p.email ? { email: p.email } : {}) },
+    });
+    const isfParty = (p) => p ? { name: p.name, address: p.address, countryAlpha2Code: p.country.toUpperCase() } : undefined;
+    const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && !(typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0)));
+    const internationalInfo = (c) => compact({
+        shipper: compact({ taxId: c.shipper_tax_id }),
+        consignee: compact({
+            taxId: c.consignee_tax_id,
+            iorNumber: c.importer_of_record_number,
+            customsBond: c.customs_bond,
+            importerRegistrationNumber: c.importer_registration_number,
+        }),
+        exporterOfRecord: c.exporter_of_record ? recordParty(c.exporter_of_record) : undefined,
+        importerOfRecord: c.importer_of_record ? recordParty(c.importer_of_record) : undefined,
+        eeiAuthorization: c.eei_authorization,
+        itn: c.itn,
+        declarations: compact({ noHazmat: c.no_hazmat, ear99Nlr: c.ear99_no_license }),
+        commodities: c.commodities?.map((l) => compact({
+            description: l.description,
+            scheduleB: l.schedule_b,
+            htsCode: l.hts_code,
+            hsCode: l.hs_code,
+            countryOfOrigin: l.country_of_origin?.toUpperCase(),
+            value: l.value_usd !== undefined ? { amount: l.value_usd, currency: "USD" } : undefined,
+            quantity: l.quantity,
+            weight: l.weight_lbs !== undefined ? { value: l.weight_lbs, unit: "lbs" } : undefined,
+            eccn: l.eccn,
+            licenseType: l.license_type,
+        })),
+        isf: c.isf ? compact({
+            seller: isfParty(c.isf.seller),
+            buyer: isfParty(c.isf.buyer),
+            manufacturer: isfParty(c.isf.manufacturer),
+            shipTo: isfParty(c.isf.ship_to),
+            containerStuffingLocation: isfParty(c.isf.container_stuffing_location),
+            consolidator: isfParty(c.isf.consolidator),
+            importerOfRecordNumber: c.isf.importer_of_record_number,
+            consigneeNumber: c.isf.consignee_number,
+        }) : undefined,
+    });
+    tool("international_book", "Book an option from international_quote. Requires the option_id the user chose (before its valid_until), full pickup and delivery addresses with company, contact name, phone in international format and email, a pickup window, and the items exactly as quoted (omit items when the quote used containers or volume). For door_to_port and port_to_door options, set port_charges_acknowledged only after the user has accepted that charges at the far port are extra. Customs: collect what you can in customs (hazmat confirmation, commodity lines with Schedule B / HTS / HS code, value, country of origin, tax ids, EEI choice for US exports); anything missing can be added later with international_customs, and the forwarder follows up for it. The incoterm and direction are set from the route. An international booking cannot be cancelled through the API (cancellations go to Warp support), so only call after the user explicitly confirms this option and price. Payment follows the account (terms, balance or card); if a payment_link comes back, the order is held until the user pays there. Auth required.", {
         option_id: z.string().describe("option_id the user chose, from your MOST RECENT international_quote"),
-        pickup: intlStopSchema.describe("Pickup address and contact"),
-        delivery: intlStopSchema.describe("Delivery address and contact"),
-        items: z.array(intlItemSchema).min(1).max(50).describe("The items exactly as quoted"),
+        pickup: intlStopSchema().describe("Pickup address and contact (the shipper)"),
+        delivery: intlStopSchema().describe("Delivery address and contact (the consignee)"),
+        items: z.array(intlItemSchema()).min(1).max(50).optional().describe("The items exactly as quoted. Omit when the quote used containers or volume."),
         port_charges_acknowledged: z.boolean().optional().describe("true once the user accepts far-port charges (door_to_port / port_to_door only)"),
-        international_info: z.record(z.unknown()).optional().describe("Optional customs data in gw's internationalInfo shape (incoterm, shipper, consignee, commodities, ...)"),
+        customs: customsSchema().optional().describe("Customs data. Send what the user has; the rest can follow with international_customs."),
+        international_info: z.record(z.unknown()).optional().describe("Advanced: raw fields in gw's internationalInfo shape, merged over customs"),
     }, { title: "Book International (Air / Ocean)", destructiveHint: true }, async (params) => {
         const start = Date.now();
         try {
             if (!WARP_API_KEY()) {
                 return { content: [{ type: "text", text: "Booking requires your own Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
             }
-            const info = { ...(params.international_info ?? {}) };
+            const info = {
+                ...(params.customs ? internationalInfo(params.customs) : {}),
+                ...(params.international_info ?? {}),
+            };
             if (params.port_charges_acknowledged !== undefined)
                 info.portChargesAcknowledged = params.port_charges_acknowledged;
             const body = {
                 quoteId: params.option_id,
                 pickupInfo: intlStop(params.pickup),
                 deliveryInfo: intlStop(params.delivery),
-                items: intlItems(params.items),
+                ...(params.items?.length ? { items: intlItems(params.items) } : {}),
                 ...(Object.keys(info).length ? { internationalInfo: info } : {}),
             };
             let data;
@@ -1677,7 +1832,7 @@ export function registerTools(server, client, getApiKey) {
             trackEvent({ product: 'warp-agent', source: 'mcp', event_type: 'book', tool_name: 'warp_international_book', mode: 'international', success: true, quote_id: params.option_id, amount_usd: quoteAmountCache.get(params.option_id), tracking_number: data.trackingNumber, order_id: data.orderId, dest_zip: [params.delivery.country.toUpperCase(), params.delivery.zipcode].filter(Boolean).join(" "), duration_ms: Date.now() - start });
             const note = typeof data.paymentLink === "string"
                 ? `The order is held until it is paid. Give the user this payment link: ${data.paymentLink}`
-                : "Booked. Track it with track using the trackingNumber; add or correct customs data with international_customs.";
+                : "Booked. Track it with track using the trackingNumber, get the BOL and customs documents with get_documents, and add or correct customs data with international_customs.";
             return { content: [{ type: "text", text: `${JSON.stringify(data, null, 2)}\n\n${note}` }] };
         }
         catch (err) {
@@ -1685,15 +1840,19 @@ export function registerTools(server, client, getApiKey) {
             return { content: [{ type: "text", text: agentError(err) }], isError: true };
         }
     });
-    tool("international_customs", "Read, or add to, the customs data on a booked international order: incoterm, shipper / consignee, importer or exporter of record, commodities (HS / HTS / Schedule B codes, values, country of origin), ITN, ISF. Omit update to read what is saved. Pass update to merge those fields in; the forwarder is notified, invalid optional values come back in warnings, and sanctioned parties are rejected. Auth required.", {
+    tool("international_customs", "Read, or add to, the customs data on a booked international order: hazmat confirmation, tax ids, importer or exporter of record, commodities (Schedule B / HTS / HS codes, values, country of origin), EEI authorization or ITN, ISF. Omit customs and update to read what is saved, including what is still missing. Pass customs to merge fields in; the forwarder is notified, invalid optional values come back in warnings, and sanctioned parties are rejected. Auth required.", {
         order_id: z.string().describe("Order id or order number (P-xxxxx-xxxx)"),
-        update: z.record(z.unknown()).optional().describe("Fields to merge, in gw's internationalInfo shape"),
+        customs: customsSchema().optional().describe("Customs fields to add or correct"),
+        update: z.record(z.unknown()).optional().describe("Advanced: raw fields in gw's internationalInfo shape, merged over customs"),
     }, { title: "International Customs Data", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }, async (params) => {
         try {
             if (!WARP_API_KEY()) {
                 return { content: [{ type: "text", text: "Customs data needs a signed-in Warp account. Run 'warp-agent login'." }], isError: true };
             }
-            const data = await client.internationalCustoms(params.order_id, params.update);
+            const update = params.customs || params.update
+                ? { ...(params.customs ? internationalInfo(params.customs) : {}), ...(params.update ?? {}) }
+                : undefined;
+            const data = await client.internationalCustoms(params.order_id, update);
             return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
         catch (err) {
@@ -1970,7 +2129,7 @@ export function registerTools(server, client, getApiKey) {
         }
     });
     // ── 5d. multistop_book ─────────────────────────────────────
-    const multistopStopSchema = z.object({
+    const multistopStopSchema = () => z.object({
         stop_index: z.number().int().min(0).describe("Index into the quoted stop sequence: 0 = first pickup, then intermediate stops in order, last = final delivery. multistop_quote echoes the sequence as stop_sequence."),
         address: z.object({
             street: z.string().describe("Street address"),
@@ -2001,8 +2160,8 @@ export function registerTools(server, client, getApiKey) {
     tool("multistop_book", "Book a multi-stop FTL route quoted by multistop_quote. Send one shipments[] leg per pickup→delivery pair riding the truck (minimum 2 legs), each leg referencing the quoted stop sequence by stop_index with full address + arrival window. No card charge fires from this call — multi-stop pricing settles via your Warp account. Auth required.", {
         quote_id: z.string().describe("Quote ID from multistop_quote (PRICING_MULTI_…). Use the id from your MOST RECENT quote — ids expire and rotate."),
         shipments: z.array(z.object({
-            pickup_info: multistopStopSchema.describe("Where this leg's freight gets picked up"),
-            delivery_info: multistopStopSchema.describe("Where this leg's freight gets dropped"),
+            pickup_info: multistopStopSchema().describe("Where this leg's freight gets picked up"),
+            delivery_info: multistopStopSchema().describe("Where this leg's freight gets dropped"),
             list_items: z.array(multistopLegItemSchema).min(1).describe("Freight riding this leg"),
         })).min(2).max(20).describe("One leg per pickup→delivery pair (the gateway requires at least 2)"),
     }, { title: "Book Multi-stop FTL", readOnlyHint: false, destructiveHint: true }, async (params) => {

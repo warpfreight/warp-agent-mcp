@@ -219,6 +219,8 @@ async function main() {
     "book inputSchema contains no $ref (clients can't dereference)",
     !JSON.stringify(bookTool?.inputSchema ?? {}).includes("$ref"),
   );
+  const withRefs = (list.result?.tools ?? []).filter((t) => JSON.stringify(t.inputSchema ?? {}).includes("$ref")).map((t) => t.name);
+  expect("no tool inputSchema contains $ref", withRefs.length === 0, withRefs.join(", "));
 
   if (schemaOnly) {
     console.log(failures === 0 ? "\n✅ schema checks passed" : `\n❌ ${failures} check(s) failed`);

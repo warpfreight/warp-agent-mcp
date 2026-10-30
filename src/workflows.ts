@@ -19,13 +19,13 @@ export const workflows = {
   invoice_review: "Compare my freight invoices with their original accepted quotes and delivery records. Match by shipment ID, list unmatched documents, and explain supported charge differences. Separate estimated opportunities, invoiced differences, disputed charges, and actual credits. Flag missing PODs, appointment evidence, and delivery exceptions without inventing causes. Do not pay, dispute, message anyone, or book.",
 };
 
-const money = z.number().finite().min(0).max(1_000_000_000).refine(v => Math.abs(v * 100 - Math.round(v * 100)) < 0.00001, "Use USD amounts with at most two decimal places");
+const money = () => z.number().finite().min(0).max(1_000_000_000).refine(v => Math.abs(v * 100 - Math.round(v * 100)) < 0.00001, "Use USD amounts with at most two decimal places");
 const evidence = z.string().trim().min(1).max(2000);
 const match = z.enum(["matched", "different", "unknown"]);
 export const comparisonRow = z.object({
   shipment_id: evidence,
-  baseline_amount_usd: money,
-  candidate_amount_usd: money,
+  baseline_amount_usd: money(),
+  candidate_amount_usd: money(),
   baseline_source: evidence.describe("Invoice or incumbent quote reference; do not invent"),
   candidate_source: evidence.describe("Warp quote ID, final invoice reference, or other supplied evidence"),
   baseline_kind: z.enum(["historical_invoice", "current_quote"]),

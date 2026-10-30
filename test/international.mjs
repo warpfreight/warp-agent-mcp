@@ -52,13 +52,15 @@ const stubClient = {
     ] };
   },
   internationalBook: async (b) => { calls.push(["book", b]); return bookResult(); },
+  internationalCustoms: async (id, update) => { calls.push(["customs", { id, update }]); return { orderId: id }; },
   internationalSettings: async () => ({ internationalEnabled: true, doorServices: ["door_to_door"] }),
   internationalCountries: async () => ({ message: "Success", data: { list_data: [{ code: "CN", name: "China", postalRequired: false }], total: 1, denylist: ["CU"] } }),
 };
 const origin = { country: "us", zipcode: "90021" };
 const destination = { country: "CN", zipcode: "200120", city: "Shanghai" };
 const items = [{ name: "Machine parts", quantity: 2, length_in: 48, width_in: 40, height_in: 50, weight_lbs_per_unit: 400 }];
-const stop = (country, zipcode) => ({ contact_name: "Li Wei", phone: "+862150000000", street: "1000 Lujiazui Ring Rd", city: "Shanghai", country, zipcode });
+const window = { from: "2026-11-02T16:00:00.000Z", to: "2026-11-02T23:00:00.000Z" };
+const stop = (country, zipcode) => ({ contact_name: "Li Wei", phone: "+862150000000", street: "1000 Lujiazui Ring Rd", city: "Shanghai", state: "Shanghai", country, zipcode, window });
 
 // keyless: refused before any call
 registerTools(server, stubClient, () => undefined);
@@ -93,6 +95,51 @@ assert.equal(bookBody.quoteId, "01AIR");
 assert.equal(bookBody.deliveryInfo.contactPhone, "+862150000000");
 assert.equal(bookBody.deliveryInfo.address.country, "CN");
 assert.deepEqual(bookBody.internationalInfo, { portChargesAcknowledged: true });
+assert.deepEqual(bookBody.pickupInfo.timeWindow, window);
+
+// cargo is described exactly one way; containers and volume go as packaging
+calls.length = 0;
+assert.equal((await handlers.get("international_quote")({ pickup_date: "2026-11-02", origin, destination, items, containers: [{ size: "40'HC", count: 1, commodity: "Furniture", weight_lbs: 12000 }] }, {})).isError, true);
+assert.equal((await handlers.get("international_quote")({ pickup_date: "2026-11-02", origin, destination }, {})).isError, true);
+assert.equal(calls.length, 0);
+await handlers.get("international_quote")({ pickup_date: "2026-11-02", origin, destination, containers: [{ size: "40'HC", count: 1, commodity: "Furniture", weight_lbs: 12000 }] }, {});
+assert.deepEqual(calls[0][1].packaging, { containers: [{ size: "40'HC", count: 1, commodity: "Furniture", weight: { value: 12000, unit: "lbs" } }] });
+assert.equal(calls[0][1].items, undefined);
+await handlers.get("international_quote")({ pickup_date: "2026-11-02", origin, destination, volume: { total_cubic_ft: 350, max_height_in: 60, total_weight_lbs: 3000, description: "Furniture" } }, {});
+assert.deepEqual(calls[1][1].packaging.volumetric, { totalVolume: { value: 350, unit: "cubic_ft" }, maxHeight: { value: 60, unit: "inch" }, weight: { value: 3000, unit: "lbs" }, description: "Furniture" });
+
+// typed customs map to gw's internationalInfo; items may be omitted for a packaging quote
+calls.length = 0;
+await handlers.get("international_book")({
+  option_id: "01FCL",
+  pickup: { ...stop("US", "90021"), instructions: "Dock 4" },
+  delivery: stop("CN", "200120"),
+  customs: {
+    no_hazmat: true,
+    shipper_tax_id: "123456789",
+    importer_registration_number: "12345678000199",
+    eei_authorization: true,
+    commodities: [{ description: "Office furniture", schedule_b: "9403300000", country_of_origin: "us", value_usd: 18000, quantity: 120, weight_lbs: 12000 }],
+    importer_of_record: { name: "Shanghai Broker Co", street: "1 Bund", city: "Shanghai", country: "cn", contact_name: "Wang", phone: "+862150000001" },
+  },
+});
+const fcl = calls.find(([k]) => k === "book")[1];
+assert.equal(fcl.items, undefined);
+assert.equal(fcl.pickupInfo.instructions, "Dock 4");
+assert.deepEqual(fcl.internationalInfo, {
+  shipper: { taxId: "123456789" },
+  consignee: { importerRegistrationNumber: "12345678000199" },
+  importerOfRecord: { name: "Shanghai Broker Co", address: { street: "1 Bund", city: "Shanghai", countryAlpha2Code: "CN" }, contact: { name: "Wang", phone: "+862150000001" } },
+  eeiAuthorization: true,
+  declarations: { noHazmat: true },
+  commodities: [{ description: "Office furniture", scheduleB: "9403300000", countryOfOrigin: "US", value: { amount: 18000, currency: "USD" }, quantity: 120, weight: { value: 12000, unit: "lbs" } }],
+});
+
+calls.length = 0;
+await handlers.get("international_customs")({ order_id: "P-1" });
+assert.equal(calls[0][1].update, undefined, "no fields means a read");
+await handlers.get("international_customs")({ order_id: "P-1", customs: { itn: "X20261030123456", commodities: [{ description: "Parts", hts_code: "8483405000" }] } });
+assert.deepEqual(calls[1][1].update, { itn: "X20261030123456", commodities: [{ description: "Parts", htsCode: "8483405000" }] });
 
 bookResult = async () => ({ orderId: "01H4", paymentLink: "https://pay.example/x" });
 assert.match((await handlers.get("international_book")({ option_id: "01SEA", pickup: stop("US", "90021"), delivery: stop("CN", "200120"), items })).content[0].text, /pay\.example/);

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.24.0 - International booking parity
+
+- `international_quote`: cargo can be ocean containers (20'DV, 40'DV, 40'HC)
+  or total volume as well as pallets. Options show the containers quoted, the
+  border crossing and leg schedule on US / Mexico truck routes, and services a
+  route does not include.
+- `international_book`: typed `customs` (hazmat confirmation, tax ids,
+  importer / exporter of record, Schedule B / HTS / HS commodity lines, EEI
+  authorization or ITN, importer registration numbers, ISF parties). Stops
+  take street2, state, driver instructions and a required time window, as gw
+  requires. Items can be omitted for container or volume quotes.
+- `international_customs`: the same typed `customs` fields.
+- Server instructions cover the international checklist and customs rules by
+  lane.
+- `parcel_book`, `multistop_book` and `compare_freight_costs` no longer
+  advertise `$ref` in their input schemas (a reused schema made the second
+  stop a reference some clients cannot read). The e2e check now covers every
+  tool.
+
 ## 0.23.1
 
 - `international_quote`: transit days were always 0. gw's `transitTime` is in
