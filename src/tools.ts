@@ -2022,6 +2022,101 @@ export function registerTools(server: McpServer, client: WarpClient, getApiKey: 
     },
   );
 
+  tool(
+    "hs_code_search",
+    "Find the customs code for a product: 10-digit HTS codes for goods imported into the US, or Schedule B codes for US exports (origin US). Search by short keywords as the official tariff wording uses them (e.g. 'chairs', 'seats', 'cotton t-shirts', 'bolts'), not marketing names; one or two words work best, and a code prefix (e.g. '9401') lists the codes under it. Show the user the matches and let them pick; the code they ship under is their call. Free, no account needed.",
+    {
+      query: z.string().min(2).max(80).describe("Product keywords or the start of a code"),
+      origin: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO alpha-2 country the freight ships FROM: 'US' for an export (Schedule B), the supplier's country for an import (HTS)"),
+      limit: z.number().int().min(1).max(20).optional().describe("Matches to return, default 10"),
+    },
+    { title: "Customs Code Search (HTS / Schedule B)", readOnlyHint: true },
+    async (params) => {
+      try {
+        const data = await client.hsCodeSearch(params.query, params.origin.toUpperCase(), params.limit ?? 10) as { scope_label?: string; matches?: Array<{ code: string; description: string }> };
+        const matches = data?.matches ?? [];
+        const guidance = matches.length
+          ? "Show these codes with their descriptions and let the user pick the one that fits. For a US import, the chosen HTS code feeds international_duty_estimate and international_book's customs commodity lines."
+          : "No match. Try fewer or simpler words in the tariff's own wording (singular or plural, the material, the use), or a 2 to 4 digit code prefix.";
+        return { content: [{ type: "text", text: `${JSON.stringify({ code_type: data?.scope_label, matches }, null, 2)}\n\n${guidance}` }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
+  const dutyReasonText: Record<string, string> = {
+    destination: "Duty estimates cover imports into the US only.",
+    no_lines: "No line could be estimated: each needs a 10-digit HTS code, a non-US country of origin and a value.",
+    no_rate: "No duty rate was found for these codes and origins.",
+    not_configured: "Duty estimates are not available right now.",
+    limit: "This account has used today's duty estimates. Try again tomorrow.",
+    upstream: "The duty rate lookup failed. Try again in a minute.",
+    timeout: "The duty rate lookup took too long. Try again in a minute.",
+  };
+  const lineReasonText: Record<string, string> = {
+    code: "needs a full 10-digit HTS code",
+    origin: "needs a non-US country of origin (goods made in the US come back duty free)",
+    value: "needs a declared value",
+    lookup: "rate lookup failed",
+  };
+
+  tool(
+    "international_duty_estimate",
+    "Estimate US import duties in dollars for the goods on an international shipment, per commodity line, from current tariff rates (base HTS rate plus Section 301 / 232 and other chapter 99 measures). Each line needs a 10-digit HTS code (find it with hs_code_search), the country the goods were made in, and the line's declared value in USD. US imports only. It is an ESTIMATE, not a customs ruling: say so, and say it excludes the merchandise processing fee, harbor maintenance fee, broker fees and any per-unit duty it flags. Use it with international_quote to give the user a landed cost (freight + duty). Auth required; each account has a daily cap.",
+    {
+      mode: z.enum(["ocean", "air"]).describe("How the goods arrive: ocean or air"),
+      lines: z.array(z.object({
+        hts: z.string().describe("10-digit HTS import code, dots allowed (e.g. 9401.61.4011)"),
+        origin: z.string().regex(/^[A-Za-z]{2}$/).describe("ISO alpha-2 country where the goods were made"),
+        value_usd: z.number().positive().describe("Declared customs value of this line, USD"),
+        description: z.string().optional().describe("What the line is, to label the answer"),
+      })).min(1).max(20).describe("One line per kind of goods"),
+    },
+    { title: "Estimate US Import Duties", readOnlyHint: true },
+    async (params) => {
+      try {
+        if (!WARP_API_KEY()) {
+          return { content: [{ type: "text", text: "Duty estimates need a Warp account. Sign up free at https://www.wearewarp.com/agents/account, then run 'warp-agent login'." }], isError: true };
+        }
+        const data = await client.internationalDutyEstimate({
+          mode: params.mode,
+          lines: params.lines.map((l) => ({ hts: l.hts, origin: l.origin.toUpperCase(), value_usd: l.value_usd })),
+        }) as {
+          available?: boolean;
+          reason?: string;
+          duty_usd?: number;
+          lines?: Array<{ index: number; duty_usd: number; specific?: { usd: number | null; uom: string | null; text: string | null } }>;
+          not_estimated?: Array<{ index: number; reason: string }>;
+        };
+        const label = (i: number) => params.lines[i]?.description ?? params.lines[i]?.hts ?? `line ${i + 1}`;
+        const notEstimated = (data.not_estimated ?? []).map((n) => ({ line: label(n.index), why: lineReasonText[n.reason] ?? n.reason }));
+        if (!data.available) {
+          return { content: [{ type: "text", text: JSON.stringify({
+            available: false,
+            reason: dutyReasonText[data.reason ?? ""] ?? "No duty estimate is available for these lines.",
+            ...(notEstimated.length ? { not_estimated: notEstimated } : {}),
+          }, null, 2) }] };
+        }
+        const out = {
+          available: true,
+          estimated_duty_usd: data.duty_usd,
+          lines: (data.lines ?? []).map((l) => ({
+            line: label(l.index),
+            value_usd: params.lines[l.index]?.value_usd,
+            estimated_duty_usd: l.duty_usd,
+            ...(l.specific ? { plus_per_unit_duty: l.specific.text ?? (l.specific.usd != null ? `$${l.specific.usd} per ${l.specific.uom ?? "unit"}` : "a per-unit duty") } : {}),
+          })),
+          ...(notEstimated.length ? { not_estimated: notEstimated } : {}),
+        };
+        const guidance = "Present this as an ESTIMATE of US import duty, not a customs ruling. It excludes the merchandise processing fee, harbor maintenance fee, customs broker fees and any per-unit duty listed. Add it to the freight price from international_quote for a landed cost.";
+        return { content: [{ type: "text", text: `${JSON.stringify(out, null, 2)}\n\n${guidance}` }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: agentError(err) }], isError: true };
+      }
+    },
+  );
+
   // ── 5b. batch_book ─────────────────────────────────────────
   // Book N already-quoted lanes in ONE tool call so a full spreadsheet of
   // priced lanes books as a single progress card instead of N noisy per-row

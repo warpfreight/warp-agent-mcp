@@ -53,6 +53,8 @@ Tools that let an AI agent talk to your Warp account:
 | `international_quote` | Air, ocean and US / Mexico truck rates for lanes with an end outside the US / Canada; pallets, containers or total volume |
 | `international_book` | Book an option from `international_quote`, with customs data (commodity codes, values, tax ids, EEI, ISF) |
 | `international_customs` | Read or add customs data on a booked international order |
+| `international_duty_estimate` | Estimated US import duty per commodity line (HTS code, origin, value), for a landed cost |
+| `hs_code_search` | Find HTS (import) or Schedule B (export) codes by product keywords or code prefix |
 | `multistop_quote` | Quote a multi-stop FTL route — one truck, 3+ stops in order |
 | `multistop_book` | Book a quoted multi-stop route as per-leg shipments |
 | `track` | Track a shipment by id or order id |

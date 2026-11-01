@@ -816,6 +816,16 @@ export class WarpClient {
         const path = `/api/v1/international/orders/${encodeURIComponent(orderId)}/customs`;
         return update ? this._selfServe("PUT", path, { body: update }) : this._selfServe("GET", path);
     }
+    /** POST /api/v1/international/duty-estimate: estimated US import duty for
+     *  commodity lines (Tarifflo rates). Auth required; capped per account per day. */
+    internationalDutyEstimate(body) {
+        return this._selfServe("POST", "/api/v1/international/duty-estimate", { body });
+    }
+    /** GET /api/v1/international/hs-codes: HTS (import) or Schedule B (export,
+     *  origin US) codes by description keywords or code prefix. Public. */
+    hsCodeSearch(q, origin, limit = 10) {
+        return this._selfServe("GET", "/api/v1/international/hs-codes", { query: { q, origin, limit: String(limit) } });
+    }
     // ── Shipments list (auth) ─────────────────────────────────────
     listBookings(limit) {
         return this.request("GET", "/freights/shipments", {

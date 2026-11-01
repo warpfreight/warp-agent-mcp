@@ -60,6 +60,8 @@ const EXPECTED_TOOLS = [
   "payment_status",
   "international_book",
   "international_customs",
+  "international_duty_estimate",
+  "hs_code_search",
   "international_quote",
   "international_settings",
   "parcel_book",

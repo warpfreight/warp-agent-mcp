@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "warp-agent-mcp",
   "display_name": "Warp Freight",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "MCP server for the Warp freight API. Quote, book, and track LTL, FTL, cargo van, and box-truck shipments from Claude Desktop, Cursor, Claude Code, or any MCP-compatible AI agent.",
   "long_description": "Freight quoting, mode and carrier comparison, shipment booking, tracking, documents, invoices, and operator review workflows through the Warp API. Use freight_workflow for shipment-intake, weekly-review, and invoice-review guidance. Use compare_freight_costs for evidence-labeled cost comparisons. Quote availability depends on lane and load. Booking creates real shipments and may incur charges; obtain explicit user confirmation. Account-specific operations require authentication.",
   "author": {
@@ -107,6 +107,14 @@
     {
       "name": "international_customs",
       "description": "Read, or add to, the customs data on a booked international order: hazmat confirmation, tax ids, importer or exporter of record, commodities (Schedule B / HTS / HS codes, values, country of origin), EEI authorization or ITN, ISF. Omit customs and update to read what is saved, including what is still missing. Pass customs to merge fields in; the forwarder is notified, invalid optional values come back in warnings, and sanctioned parties are rejected. Auth required."
+    },
+    {
+      "name": "hs_code_search",
+      "description": "Find the customs code for a product: 10-digit HTS codes for goods imported into the US, or Schedule B codes for US exports (origin US). Search by short keywords as the official tariff wording uses them (e.g. 'chairs', 'seats', 'cotton t-shirts', 'bolts'), not marketing names; one or two words work best, and a code prefix (e.g. '9401') lists the codes under it. Show the user the matches and let them pick; the code they ship under is their call. Free, no account needed."
+    },
+    {
+      "name": "international_duty_estimate",
+      "description": "Estimate US import duties in dollars for the goods on an international shipment, per commodity line, from current tariff rates (base HTS rate plus Section 301 / 232 and other chapter 99 measures). Each line needs a 10-digit HTS code (find it with hs_code_search), the country the goods were made in, and the line's declared value in USD. US imports only. It is an ESTIMATE, not a customs ruling: say so, and say it excludes the merchandise processing fee, harbor maintenance fee, broker fees and any per-unit duty it flags. Use it with international_quote to give the user a landed cost (freight + duty). Auth required; each account has a daily cap."
     },
     {
       "name": "batch_book",

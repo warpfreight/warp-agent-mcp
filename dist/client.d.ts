@@ -24,7 +24,7 @@ export declare class BookingPendingError extends Error {
  *  Bookings run 30-60s end to end (gw booking inside); hosted MCP functions and
  *  most MCP clients stop at 60s, so 50s leaves room to answer inside that. */
 export declare const BOOK_TIMEOUT_MS: number;
-export declare const USER_AGENT = "warp-agent-mcp/0.24.0";
+export declare const USER_AGENT = "warp-agent-mcp/0.25.0";
 /** Multi-carrier LTL spread plus the timeout signals the market-options route
  *  returns when its carrier poll times out (retryable + a human note + a
  *  last-good cached spread). The caller surfaces these instead of dropping the
@@ -196,6 +196,19 @@ export declare class WarpClient {
     /** GET or PUT /api/v1/international/orders/{id}/customs: read, or merge
      *  fields into, an international order's customs data. */
     internationalCustoms(orderId: string, update?: Record<string, unknown>): Promise<unknown>;
+    /** POST /api/v1/international/duty-estimate: estimated US import duty for
+     *  commodity lines (Tarifflo rates). Auth required; capped per account per day. */
+    internationalDutyEstimate(body: {
+        mode: "ocean" | "air";
+        lines: Array<{
+            hts: string;
+            origin: string;
+            value_usd: number;
+        }>;
+    }): Promise<unknown>;
+    /** GET /api/v1/international/hs-codes: HTS (import) or Schedule B (export,
+     *  origin US) codes by description keywords or code prefix. Public. */
+    hsCodeSearch(q: string, origin: string, limit?: number): Promise<unknown>;
     listBookings(limit?: number): Promise<unknown>;
     track(shipmentId: string): Promise<unknown>;
     cancel(params: Record<string, unknown>): Promise<unknown>;

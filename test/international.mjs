@@ -39,6 +39,7 @@ await assert.rejects(client.internationalBook({ quoteId: "01O" }), (e) => e inst
 globalThis.fetch = realFetch;
 
 // ── tools ─────────────────────────────────────────────────────
+let dutyResult = async () => ({ available: true, duty_usd: 1250, lines: [{ index: 0, duty_usd: 1250 }], not_estimated: [{ index: 1, reason: "code" }] });
 const handlers = new Map();
 const server = { registerTool(name, _config, handler) { handlers.set(name, handler); return { update() {} }; } };
 const calls = [];
@@ -53,6 +54,8 @@ const stubClient = {
   },
   internationalBook: async (b) => { calls.push(["book", b]); return bookResult(); },
   internationalCustoms: async (id, update) => { calls.push(["customs", { id, update }]); return { orderId: id }; },
+  internationalDutyEstimate: async (b) => { calls.push(["duty", b]); return dutyResult(); },
+  hsCodeSearch: async (q, origin, limit) => { calls.push(["hs", { q, origin, limit }]); return { scope_label: "HS code", matches: q === "zzz" ? [] : [{ code: "9401614011", description: "CHAIRS, HOUSEHOLD, UPHOLSTERED, WITH WOODEN FRAMES" }] }; },
   internationalSettings: async () => ({ internationalEnabled: true, doorServices: ["door_to_door"] }),
   internationalCountries: async () => ({ message: "Success", data: { list_data: [{ code: "CN", name: "China", postalRequired: false }], total: 1, denylist: ["CU"] } }),
 };
@@ -66,6 +69,7 @@ const stop = (country, zipcode) => ({ contact_name: "Li Wei", phone: "+862150000
 registerTools(server, stubClient, () => undefined);
 assert.equal((await handlers.get("international_quote")({ pickup_date: "2026-11-02", origin, destination, items }, {})).isError, true);
 assert.equal((await handlers.get("international_book")({ option_id: "01SEA", pickup: stop("US", "90021"), delivery: stop("CN", "200120"), items })).isError, true);
+assert.equal((await handlers.get("international_duty_estimate")({ mode: "ocean", lines: [{ hts: "9401614011", origin: "CN", value_usd: 10 }] })).isError, true);
 assert.equal(calls.length, 0, "keyless international calls must not reach warp-site");
 
 registerTools(server, stubClient, () => "wak_live_x");
@@ -140,6 +144,31 @@ await handlers.get("international_customs")({ order_id: "P-1" });
 assert.equal(calls[0][1].update, undefined, "no fields means a read");
 await handlers.get("international_customs")({ order_id: "P-1", customs: { itn: "X20261030123456", commodities: [{ description: "Parts", hts_code: "8483405000" }] } });
 assert.deepEqual(calls[1][1].update, { itn: "X20261030123456", commodities: [{ description: "Parts", htsCode: "8483405000" }] });
+
+// hs_code_search: origin uppercased, matches shown, a miss gets search advice
+calls.length = 0;
+const hs = await handlers.get("hs_code_search")({ query: "chairs", origin: "cn" });
+assert.deepEqual(calls[0][1], { q: "chairs", origin: "CN", limit: 10 });
+assert.match(hs.content[0].text, /9401614011/);
+assert.match((await handlers.get("hs_code_search")({ query: "zzz", origin: "CN" })).content[0].text, /No match/);
+
+// international_duty_estimate: lines sent clean, answer labeled, estimate caveat, reasons in words
+calls.length = 0;
+const duty = await handlers.get("international_duty_estimate")({
+  mode: "ocean",
+  lines: [
+    { hts: "9401.61.4011", origin: "cn", value_usd: 5000, description: "Upholstered chairs" },
+    { hts: "9401", origin: "CN", value_usd: 100, description: "Parts" },
+  ],
+});
+assert.deepEqual(calls[0][1], { mode: "ocean", lines: [{ hts: "9401.61.4011", origin: "CN", value_usd: 5000 }, { hts: "9401", origin: "CN", value_usd: 100 }] });
+const dutyOut = JSON.parse(duty.content[0].text.split("\n\n")[0]);
+assert.equal(dutyOut.estimated_duty_usd, 1250);
+assert.equal(dutyOut.lines[0].line, "Upholstered chairs");
+assert.match(dutyOut.not_estimated[0].why, /10-digit/);
+assert.match(duty.content[0].text, /ESTIMATE/);
+dutyResult = async () => ({ available: false, reason: "limit" });
+assert.match((await handlers.get("international_duty_estimate")({ mode: "air", lines: [{ hts: "9401614011", origin: "CN", value_usd: 10 }] })).content[0].text, /today's duty estimates/);
 
 bookResult = async () => ({ orderId: "01H4", paymentLink: "https://pay.example/x" });
 assert.match((await handlers.get("international_book")({ option_id: "01SEA", pickup: stop("US", "90021"), delivery: stop("CN", "200120"), items })).content[0].text, /pay\.example/);

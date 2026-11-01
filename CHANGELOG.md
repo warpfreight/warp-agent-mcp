@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.0 - Duties and customs codes
+
+- `international_duty_estimate`: estimated US import duty in dollars per
+  commodity line (10-digit HTS code, country of origin, declared value), ocean
+  or air, from current tariff rates including Section 301 / 232 measures. An
+  estimate, not a ruling; excludes MPF, HMF and broker fees. Pairs with
+  `international_quote` for a landed cost. Auth required, capped per account
+  per day.
+- `hs_code_search`: HTS (import) or Schedule B (export, origin US) codes by
+  product keywords or code prefix. Free, no account needed.
+
 ## 0.24.0 - International booking parity
 
 - `international_quote`: cargo can be ocean containers (20'DV, 40'DV, 40'HC)

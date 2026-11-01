@@ -900,6 +900,18 @@ export class WarpClient {
     return update ? this._selfServe("PUT", path, { body: update }) : this._selfServe("GET", path);
   }
 
+  /** POST /api/v1/international/duty-estimate: estimated US import duty for
+   *  commodity lines (Tarifflo rates). Auth required; capped per account per day. */
+  internationalDutyEstimate(body: { mode: "ocean" | "air"; lines: Array<{ hts: string; origin: string; value_usd: number }> }) {
+    return this._selfServe("POST", "/api/v1/international/duty-estimate", { body });
+  }
+
+  /** GET /api/v1/international/hs-codes: HTS (import) or Schedule B (export,
+   *  origin US) codes by description keywords or code prefix. Public. */
+  hsCodeSearch(q: string, origin: string, limit = 10) {
+    return this._selfServe("GET", "/api/v1/international/hs-codes", { query: { q, origin, limit: String(limit) } });
+  }
+
   // ── Shipments list (auth) ─────────────────────────────────────
 
   listBookings(limit?: number) {
