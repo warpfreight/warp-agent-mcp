@@ -143,7 +143,7 @@ export class WarpClient {
         // When overridden to hit gw.wearewarp.com directly, also send the
         // legacy `apikey:` header (raw gateway key) as a fallback.
         h["authorization"] = `Bearer ${key}`;
-        if (this.base.includes("gw.wearewarp.com")) {
+        if (new URL(this.base).hostname === "gw.wearewarp.com") {
           h["apikey"] = key;
         }
       }

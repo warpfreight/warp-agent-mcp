@@ -114,18 +114,10 @@ function loadCustomerEmail(): string | undefined {
 // Export for use in analytics module
 export const LOADED_CUSTOMER_EMAIL = loadCustomerEmail();
 
-// Debug: log key status to stderr (visible in Claude Desktop logs)
 if (WARP_API_KEY) {
-  console.error(`[warp-mcp] API key loaded (${WARP_API_KEY.length} chars, starts: ${WARP_API_KEY.slice(0, 4)})`);
+  console.error("[warp-mcp] API key loaded");
 } else {
-  console.error(`[warp-mcp] NO API KEY FOUND. HOME=${process.env.HOME} USER=${process.env.USER}`);
-  // List what we tried
-  const tried = [
-    process.env.WARP_API_KEY ? `WARP_API_KEY env (${process.env.WARP_API_KEY.length} chars)` : "WARP_API_KEY env (not set)",
-    `HOME=${process.env.HOME}`,
-    `USER=${process.env.USER}`,
-  ];
-  console.error(`[warp-mcp] Tried: ${tried.join(", ")}`);
+  console.error("[warp-mcp] No API key found. Set WARP_API_KEY or run `warp-agent login`.");
 }
 
 const server = new McpServer(
